@@ -4,6 +4,17 @@ on:
   push:
     branches:
       - main
+    # paths:
+    #   - "skills/**"
+    #   - "plugins/**"
+    #   - ".agents/plugins/**"
+    #   - "docs/**"
+    #   - "README.md"
+    #   - "LICENSE"
+    #   - "CHANGELOG.md"
+    #   - "pyproject.toml"
+    #   - ".github/workflows/release-skill.yml"
+    #   - "tests/**"
 
 permissions:
   contents: write
@@ -45,30 +56,14 @@ jobs:
         run: |
           gh skill publish --dry-run
 
-      - name: Compute next release tag
+      - name: Compute timestamp release tag
         id: version
         shell: bash
         run: |
           set -euo pipefail
-
-          git fetch --tags --force
-
-          BASE_MINOR="v0.1"
-          latest="$(git tag -l "${BASE_MINOR}.*" --sort=-v:refname | head -n 1 || true)"
-
-          if [ -z "$latest" ]; then
-            next="${BASE_MINOR}.0"
-          else
-            patch="${latest##*.}"
-            if ! [[ "$patch" =~ ^[0-9]+$ ]]; then
-              echo "Latest tag $latest does not end in a numeric patch version." >&2
-              exit 1
-            fi
-            next="${BASE_MINOR}.$((patch + 1))"
-          fi
-
-          echo "tag=$next" >> "$GITHUB_OUTPUT"
-          echo "Next release tag: $next"
+          tag="v$(date -u +'%Y.%m.%d.%H%M%S')"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Next release tag: $tag"
 
       - name: Publish skill release
         env:
