@@ -41,18 +41,44 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install GitHub CLI with gh skill support
+      - name: Ensure GitHub CLI has gh skill support
         shell: bash
         run: |
           set -euo pipefail
 
-          GH_VERSION="2.90.0"
-          ARCH="$(dpkg --print-architecture)"
+          echo "Preinstalled gh:"
+          gh --version || true
 
-          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.deb" -o /tmp/gh.deb
+          if gh skill --help >/dev/null 2>&1; then
+            echo "gh skill is already available."
+            exit 0
+          fi
+
+          echo "gh skill is missing; installing latest GitHub CLI release..."
+
+          ARCH="$(dpkg --print-architecture)"
+          case "$ARCH" in
+            amd64) GH_ARCH="amd64" ;;
+            arm64) GH_ARCH="arm64" ;;
+            *)
+              echo "Unsupported architecture: $ARCH" >&2
+              exit 1
+              ;;
+          esac
+
+          GH_VERSION="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"].lstrip("v"))')"
+
+          echo "Installing gh ${GH_VERSION} for ${GH_ARCH}"
+
+          curl -fsSL \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.deb" \
+            -o /tmp/gh.deb
+
           sudo apt-get update
           sudo apt-get install -y /tmp/gh.deb
 
+          echo "Installed gh:"
           gh --version
           gh skill --help
 
