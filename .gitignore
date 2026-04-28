@@ -1,15 +1,23 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 .pytest_cache/
-.mypy_cache/
 .ruff_cache/
+.mypy_cache/
 .venv/
+venv/
 
-# Generated audit output from local tests
-.codex/reports/
+# Generated audit reports
+.codex/reports/harness-engineering-audit/
 
-# OS / editor
+# OS/editor
 .DS_Store
 .idea/
 .vscode/
+
+# Build/dist
+build/
+dist/
+*.egg-info/

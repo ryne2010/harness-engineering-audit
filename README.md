@@ -4,86 +4,65 @@
 
 It is audit-first and strict. It inventories a repo, scores the harness-engineering surface, writes report artifacts, and produces an OMX-ready handoff so approved fixes can move through `$deep-interview`, `$ralplan`, `$team`, and `$ralph`.
 
-The skill is designed for:
+## What it checks
 
-- Codex and OMX workflows
-- `AGENTS.md` and nested instruction hygiene
-- `.codex/config.toml` readiness
-- MCP, hooks, rules, skills, and subagent review
-- cross-agent surface checks such as Claude, Cursor, Gemini CLI, Cline, Windsurf, and related files
-- docs authority and validation-command truth
-- production-readiness for agentic development
+- `AGENTS.md` and nested instruction files
+- `.codex/config.toml`, MCP servers, hooks, prompts, and rules
+- repo-scoped skills in `.agents/skills`
+- OMX contexts, plans, and workflow docs
+- validation commands and package scripts
+- CI workflows
+- docs authority and index coverage
+- generated artifact lifecycle
+- scaffolding / preview / legacy entropy
+- cross-agent surfaces such as Claude, Cursor, Gemini CLI, Cline, Windsurf, and Copilot files
 
-## Repository layout
+## Install with GitHub CLI
 
-```text
-harness-engineering-audit/
-  README.md
-  LICENSE
-  CHANGELOG.md
-  Makefile
-  pyproject.toml
-  docs/
-    INSTALL.md
-    PUBLISHING.md
-    PLUGIN_DISTRIBUTION.md
-    USAGE.md
-    OMX_WORKFLOW.md
-    RELEASE_CHECKLIST.md
-    REPOSITORY_STRUCTURE.md
-  skills/
-    harness-engineering-audit/
-      SKILL.md
-      agents/openai.yaml
-      scripts/*.py
-      assets/*
-      references/*
-  plugins/
-    harness-engineering-audit/
-      .codex-plugin/plugin.json
-      skills/harness-engineering-audit/
-  .agents/
-    plugins/marketplace.json
-  tests/
-    smoke/run_skill_smoke.py
-```
-
-## Install from GitHub with `gh skill`
-
-Replace `OWNER` with your GitHub username or organization.
-
-Project scope:
+Install into the current repo as a Codex project skill:
 
 ```bash
-gh skill install OWNER/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope project
+gh skill install ryne2010/harness-engineering-audit \
+  skills/harness-engineering-audit \
+  --agent codex \
+  --scope project
 ```
 
-User scope:
+Install a pinned release:
 
 ```bash
-gh skill install OWNER/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope user
+gh skill install ryne2010/harness-engineering-audit \
+  skills/harness-engineering-audit@v0.1.1 \
+  --agent codex \
+  --scope project
 ```
 
-Pinned version:
+Install globally for your user:
 
 ```bash
-gh skill install OWNER/harness-engineering-audit skills/harness-engineering-audit@v0.1.0 --agent codex --scope project
+gh skill install ryne2010/harness-engineering-audit \
+  skills/harness-engineering-audit@v0.1.1 \
+  --agent codex \
+  --scope user
 ```
 
-## Install from a local clone
+## Download manually
+
+Download the latest GitHub release ZIP, unzip it, and copy the skill into a repo:
+
+```bash
+mkdir -p .agents/skills
+cp -R /path/to/harness-engineering-audit/skills/harness-engineering-audit \
+  .agents/skills/harness-engineering-audit
+```
+
+Or install from a local clone:
 
 ```bash
 gh skill install ./skills/harness-engineering-audit --agent codex --scope project
 ```
 
-Or copy manually into a repo:
-
-```bash
-mkdir -p .agents/skills
-cp -R skills/harness-engineering-audit .agents/skills/
-```
-
-## Run the audit manually
+## Run the audit
 
 From a target repo root after installing the skill:
 
@@ -103,37 +82,77 @@ The audit replaces the previous generated report set at:
   omx-handoff.md
 ```
 
-## Publish as a GitHub-hosted skill
+Use the generated handoff with OMX:
 
-```bash
-python3 -m py_compile skills/harness-engineering-audit/scripts/*.py
-python3 tests/smoke/run_skill_smoke.py
-gh skill publish --dry-run
-git add -A
-git commit -m "Initial harness engineering audit skill"
-gh repo create OWNER/harness-engineering-audit --public --source=. --remote=origin --push
-gh skill publish --tag v0.1.0
+```text
+$deep-interview "Read .codex/reports/harness-engineering-audit/omx-handoff.md and conduct a harness-engineering review."
+$ralplan "Use the harness-engineering audit report and interview output to write the PRD and test spec."
+$team "Execute only approved low-risk harness-engineering fixes."
+$ralph "Verify the cleanup and produce the final stop/no-stop recommendation."
 ```
-
-Full publishing steps are in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
 ## Optional Codex plugin wrapper
 
-This repo also includes an optional plugin wrapper under:
+This repo includes an optional plugin wrapper under:
 
 ```text
 plugins/harness-engineering-audit/
 ```
 
-Use this after the skill install path is working and you want a richer plugin distribution model. See [`docs/PLUGIN_DISTRIBUTION.md`](docs/PLUGIN_DISTRIBUTION.md).
+The plugin wrapper is secondary. The recommended install path today is `gh skill install`. See [`docs/PLUGIN_DISTRIBUTION.md`](docs/PLUGIN_DISTRIBUTION.md) for the plugin marketplace flow.
 
-## Validation
+## Repository layout
+
+```text
+harness-engineering-audit/
+  README.md
+  LICENSE
+  CHANGELOG.md
+  Makefile
+  pyproject.toml
+  docs/
+    INSTALL.md
+    PUBLISHING.md
+    PLUGIN_DISTRIBUTION.md
+    USAGE.md
+    OMX_WORKFLOW.md
+    RELEASE_CHECKLIST.md
+  skills/
+    harness-engineering-audit/
+      SKILL.md
+      agents/openai.yaml
+      scripts/*.py
+      assets/*
+      references/*
+  plugins/
+    harness-engineering-audit/
+      .codex-plugin/plugin.json
+      skills/harness-engineering-audit/
+  .agents/plugins/marketplace.json
+  tests/smoke/run_skill_smoke.py
+```
+
+## Validate this repo
 
 ```bash
 make validate
 ```
 
-This runs Python syntax checks and a smoke test that generates audit artifacts in a temporary repo.
+Equivalent commands:
+
+```bash
+python3 -m py_compile skills/harness-engineering-audit/scripts/*.py tests/smoke/run_skill_smoke.py
+python3 tests/smoke/run_skill_smoke.py
+```
+
+## Publish
+
+```bash
+gh skill publish --dry-run
+gh skill publish --tag v0.1.1
+```
+
+Full publishing steps are in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
 ## License
 

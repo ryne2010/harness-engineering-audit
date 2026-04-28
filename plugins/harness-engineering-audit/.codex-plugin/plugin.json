@@ -1,11 +1,11 @@
 {
   "name": "harness-engineering-audit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Audit repositories for OpenAI-style harness engineering and Codex/OMX readiness.",
   "author": {
     "name": "Ryne Schroder"
   },
-  "repository": "https://github.com/OWNER/harness-engineering-audit",
+  "repository": "https://github.com/ryne2010/harness-engineering-audit",
   "license": "MIT",
   "keywords": [
     "codex",
@@ -25,7 +25,7 @@
     "capabilities": [
       "Read"
     ],
-    "websiteURL": "https://github.com/OWNER/harness-engineering-audit",
+    "websiteURL": "https://github.com/ryne2010/harness-engineering-audit",
     "defaultPrompt": [
       "Use Harness Engineering Audit to assess this repo for Codex/OMX readiness.",
       "Run the harness engineering audit and produce an OMX handoff report."

@@ -30,7 +30,7 @@ def main() -> int:
         (repo / "package.json").write_text(json.dumps({"scripts": {"test": "echo ok"}}, indent=2), encoding="utf-8")
 
         result = subprocess.run(
-            [sys.executable, str(RUN_AUDIT), str(repo)],
+            [sys.executable, "-S", str(RUN_AUDIT), str(repo)],
             cwd=str(REPO_ROOT),
             text=True,
             stdout=subprocess.PIPE,
