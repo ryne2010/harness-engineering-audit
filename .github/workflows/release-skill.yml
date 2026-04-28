@@ -4,17 +4,17 @@ on:
   push:
     branches:
       - main
-    # paths:
-    #   - "skills/**"
-    #   - "plugins/**"
-    #   - ".agents/plugins/**"
-    #   - "docs/**"
-    #   - "README.md"
-    #   - "LICENSE"
-    #   - "CHANGELOG.md"
-    #   - "pyproject.toml"
-    #   - ".github/workflows/release-skill.yml"
-    #   - "tests/**"
+    paths:
+      - "skills/**"
+      - "plugins/**"
+      - ".agents/plugins/**"
+      - "docs/**"
+      - "README.md"
+      - "LICENSE"
+      - "CHANGELOG.md"
+      - "pyproject.toml"
+      - ".github/workflows/release-skill.yml"
+      - "tests/**"
 
 permissions:
   contents: write
