@@ -32,14 +32,29 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: Install GitHub CLI with gh skill support
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          GH_VERSION="2.90.0"
+          ARCH="$(dpkg --print-architecture)"
+
+          curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.deb" -o /tmp/gh.deb
+          sudo apt-get update
+          sudo apt-get install -y /tmp/gh.deb
+
+          gh --version
+          gh skill --help
 
       - name: Validate Python scripts
         run: |
