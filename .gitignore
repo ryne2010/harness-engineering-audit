@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Generated audit output from local tests
+.codex/reports/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

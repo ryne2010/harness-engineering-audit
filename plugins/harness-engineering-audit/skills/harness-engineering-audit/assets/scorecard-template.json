@@ -1,0 +1,19 @@
+{
+  "dimensions": [
+    "Agent Legibility",
+    "Instruction Hygiene",
+    "Docs Authority",
+    "Validation Truth",
+    "Harness Feedback Loops",
+    "Codex Config Readiness",
+    "Skills Readiness",
+    "MCP Readiness",
+    "Hooks / Rules Safety",
+    "Subagent / OMX Workflow",
+    "Cross-Agent Compatibility",
+    "Entropy / Scaffolding Control",
+    "Production Readiness"
+  ],
+  "score_scale": "0-10",
+  "recommendation_risk_levels": ["low", "medium", "high"]
+}

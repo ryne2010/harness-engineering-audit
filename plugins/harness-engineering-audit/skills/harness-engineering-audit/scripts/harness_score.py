@@ -1,0 +1,404 @@
+#!/usr/bin/env python3
+"""Score a harness-engineering inventory."""
+from __future__ import annotations
+
+import argparse
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Tuple
+
+DIMENSIONS = [
+    "Agent Legibility",
+    "Instruction Hygiene",
+    "Docs Authority",
+    "Validation Truth",
+    "Harness Feedback Loops",
+    "Codex Config Readiness",
+    "Skills Readiness",
+    "MCP Readiness",
+    "Hooks / Rules Safety",
+    "Subagent / OMX Workflow",
+    "Cross-Agent Compatibility",
+    "Entropy / Scaffolding Control",
+    "Production Readiness",
+]
+
+
+def clamp(score: int) -> int:
+    return max(0, min(10, int(score)))
+
+
+def status(score: int) -> str:
+    if score >= 9:
+        return "excellent"
+    if score >= 7:
+        return "strong"
+    if score >= 5:
+        return "partial"
+    if score >= 3:
+        return "weak"
+    return "missing"
+
+
+def add(score: int, points: int, evidence: List[str], text: str) -> int:
+    evidence.append(text)
+    return score + points
+
+
+def dim(name: str, score: int, evidence: List[str], gaps: List[str], recs: List[Dict[str, str]]) -> Dict[str, Any]:
+    return {
+        "name": name,
+        "score": clamp(score),
+        "status": status(clamp(score)),
+        "evidence": evidence,
+        "gaps": gaps,
+        "recommendations": recs,
+    }
+
+
+def any_script(manifests: List[Dict[str, Any]], keywords: List[str]) -> bool:
+    for m in manifests:
+        scripts = m.get("scripts") or {}
+        for name, cmd in scripts.items():
+            low = f"{name} {cmd}".lower()
+            if any(k in low for k in keywords):
+                return True
+    return False
+
+
+def script_names(manifests: List[Dict[str, Any]], keywords: List[str]) -> List[str]:
+    found = []
+    for m in manifests:
+        scripts = m.get("scripts") or {}
+        for name, cmd in scripts.items():
+            low = f"{name} {cmd}".lower()
+            if any(k in low for k in keywords):
+                found.append(f"{m.get('path')}::{name}")
+    return sorted(found)
+
+
+def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
+    dims: List[Dict[str, Any]] = []
+    manifests = inv.get("manifests", [])
+    docs = inv.get("docs", {})
+    instructions = inv.get("instruction_files", [])
+    codex = inv.get("codex", {})
+    skills = inv.get("skills", {})
+    omx = inv.get("omx", {})
+    ci = inv.get("ci", {})
+    markers = inv.get("markers", {})
+    gen = inv.get("generated_artifacts", {})
+
+    # 1 Agent Legibility
+    evidence: List[str] = []
+    gaps: List[str] = []
+    recs: List[Dict[str, str]] = []
+    s = 0
+    if instructions:
+        s = add(s, 2, evidence, f"Found {len(instructions)} AGENTS instruction file(s).")
+    else:
+        gaps.append("No AGENTS.md files found.")
+        recs.append({"risk": "low", "title": "Add concise root AGENTS.md", "detail": "Create a map-like root AGENTS.md with commands, constraints, and docs pointers."})
+    if docs.get("exists"):
+        s = add(s, 2, evidence, f"docs/ exists with {len(docs.get('files', []))} markdown file(s).")
+    else:
+        gaps.append("No docs/ directory found.")
+    if docs.get("indexes"):
+        s = add(s, 2, evidence, f"Found docs index candidates: {', '.join(docs.get('indexes', [])[:5])}")
+    else:
+        gaps.append("No obvious docs index found.")
+        recs.append({"risk": "low", "title": "Add docs index", "detail": "Add docs/README.md or docs/pack/SPEC_INDEX.md as the docs entry point."})
+    if manifests:
+        s = add(s, 1, evidence, f"Found {len(manifests)} manifest/build entry file(s).")
+    if any_script(manifests, ["test", "lint", "build", "validate", "typecheck", "smoke"]):
+        s = add(s, 2, evidence, "Validation/build scripts are discoverable from manifests.")
+    else:
+        gaps.append("No obvious validation/build scripts found in manifests.")
+    dims.append(dim("Agent Legibility", s, evidence, gaps, recs))
+
+    # 2 Instruction Hygiene
+    evidence, gaps, recs = [], [], []
+    s = 6 if instructions else 2
+    root_agents = [x for x in instructions if x.get("path") == "AGENTS.md"]
+    if root_agents:
+        root = root_agents[0]
+        if root.get("bytes", 0) <= 16_384:
+            s = add(s, 2, evidence, "Root AGENTS.md is within the strict 16 KiB target.")
+        elif root.get("bytes", 0) <= 32_768:
+            s = add(s, 1, evidence, "Root AGENTS.md is under 32 KiB but may be too heavy for hot-path use.")
+            gaps.append("Root AGENTS.md exceeds strict 16 KiB map-like target.")
+            recs.append({"risk": "low", "title": "Trim root AGENTS.md", "detail": "Move detailed role/process content into docs and keep root AGENTS as a routing map."})
+        else:
+            gaps.append("Root AGENTS.md is larger than 32 KiB and likely too large for hot-path guidance.")
+            recs.append({"risk": "low", "title": "Shrink root AGENTS.md", "detail": "Convert root AGENTS.md into a concise map and move details to docs."})
+            s -= 2
+    else:
+        gaps.append("No root AGENTS.md found.")
+    duplicate_big = [x for x in instructions if x.get("bytes", 0) > 32_768]
+    if not duplicate_big:
+        s = add(s, 1, evidence, "No AGENTS files exceed 32 KiB.")
+    else:
+        gaps.append(f"Large AGENTS files: {', '.join(x['path'] for x in duplicate_big)}")
+    nested = [x for x in instructions if x.get("path") != "AGENTS.md"]
+    if nested:
+        s = add(s, 1, evidence, f"Found scoped nested instruction file(s): {', '.join(x['path'] for x in nested[:5])}")
+    dims.append(dim("Instruction Hygiene", s, evidence, gaps, recs))
+
+    # 3 Docs Authority
+    evidence, gaps, recs = [], [], []
+    s = 0
+    if docs.get("exists"):
+        s = add(s, 2, evidence, "docs/ exists.")
+    if docs.get("indexes"):
+        s = add(s, 2, evidence, "Docs index candidates exist.")
+    else:
+        gaps.append("No docs index candidates found.")
+    if docs.get("authority_docs"):
+        s = add(s, 2, evidence, f"Authority/canonical docs detected: {', '.join(docs.get('authority_docs', [])[:5])}")
+    else:
+        gaps.append("No docs authority/source-of-truth guidance detected.")
+        recs.append({"risk": "low", "title": "Add docs authority map", "detail": "Document which docs are source-of-truth, generated, archived, or supporting."})
+    if docs.get("generated_policy_docs"):
+        s = add(s, 2, evidence, "Generated artifact policy candidates detected.")
+    else:
+        gaps.append("No generated artifact lifecycle policy detected.")
+    if inv.get("validation_docs"):
+        s = add(s, 1, evidence, f"Validation-related docs detected: {len(inv.get('validation_docs', []))}.")
+    dims.append(dim("Docs Authority", s, evidence, gaps, recs))
+
+    # 4 Validation Truth
+    evidence, gaps, recs = [], [], []
+    s = 0
+    validations = script_names(manifests, ["test", "lint", "typecheck", "build", "validate", "smoke", "e2e", "check"])
+    if validations:
+        s = add(s, 4, evidence, f"Found validation scripts: {', '.join(validations[:10])}")
+    else:
+        gaps.append("No validation scripts found.")
+        recs.append({"risk": "low", "title": "Create validation matrix", "detail": "Inventory real lint/test/typecheck/build/smoke commands and document when to run them."})
+    if ci.get("workflows"):
+        s = add(s, 2, evidence, f"Found CI workflows: {len(ci.get('workflows', []))}.")
+    else:
+        gaps.append("No CI workflows detected.")
+    if ci.get("validation_mentions"):
+        s = add(s, 2, evidence, "CI workflows appear to run validation commands.")
+    if inv.get("validation_docs"):
+        s = add(s, 1, evidence, "Validation commands are mentioned in docs/manifests.")
+    dims.append(dim("Validation Truth", s, evidence, gaps, recs))
+
+    # 5 Harness Feedback Loops
+    evidence, gaps, recs = [], [], []
+    s = 0
+    tools_dev = [m for m in manifests if m.get("path", "").startswith("tools/") or "tools/dev" in m.get("path", "")]
+    generated_dirs = gen.get("candidate_dirs", [])
+    if generated_dirs:
+        s = add(s, 2, evidence, f"Generated/golden/report artifact dirs detected: {len(generated_dirs)}.")
+    else:
+        gaps.append("No generated/golden/report artifact directories detected.")
+    if any_script(manifests, ["preflight", "smoke", "e2e", "validate"]):
+        s = add(s, 3, evidence, "Preflight/smoke/e2e/validate scripts detected.")
+    else:
+        gaps.append("No obvious preflight/smoke/e2e validation loop detected.")
+    if ci.get("workflows"):
+        s = add(s, 2, evidence, "CI exists as a feedback loop.")
+    if tools_dev:
+        s = add(s, 1, evidence, "tools/dev manifest-like files detected.")
+    if docs.get("generated_policy_docs"):
+        s = add(s, 1, evidence, "Generated artifact policy exists.")
+    dims.append(dim("Harness Feedback Loops", s, evidence, gaps, recs))
+
+    # 6 Codex Config
+    evidence, gaps, recs = [], [], []
+    s = 5
+    if codex.get("exists"):
+        s = add(s, 1, evidence, ".codex/ exists.")
+    if codex.get("config"):
+        s = add(s, 2, evidence, f"Codex config present: {codex.get('config')}")
+    else:
+        gaps.append("No repo-local .codex/config.toml detected.")
+    if codex.get("mcp_servers"):
+        s = add(s, 1, evidence, f"MCP servers configured: {', '.join(codex.get('mcp_servers', []))}")
+    if codex.get("hooks"):
+        s = add(s, 1, evidence, "Codex hooks config present.")
+    dims.append(dim("Codex Config Readiness", s, evidence, gaps, recs))
+
+    # 7 Skills
+    evidence, gaps, recs = [], [], []
+    s = 4
+    repo_skills = skills.get("repo_skills", [])
+    codex_skills = skills.get("codex_skills", [])
+    if repo_skills:
+        s = add(s, 3, evidence, f"Repo-scoped skills detected: {', '.join(x['name'] for x in repo_skills[:10])}")
+    else:
+        gaps.append("No repo-scoped skills detected.")
+    if codex_skills:
+        s = add(s, 1, evidence, f".codex/skills detected: {len(codex_skills)}.")
+    if skills.get("duplicate_names"):
+        gaps.append("Duplicate skill names detected.")
+        recs.append({"risk": "low", "title": "Resolve duplicate skill names", "detail": "Codex does not merge same-name skills; keep one authoritative skill per name."})
+        s -= 2
+    else:
+        s = add(s, 1, evidence, "No duplicate skill names detected.")
+    dims.append(dim("Skills Readiness", s, evidence, gaps, recs))
+
+    # 8 MCP
+    evidence, gaps, recs = [], [], []
+    mcp = codex.get("mcp_servers", [])
+    s = 6
+    if mcp:
+        s = add(s, 3, evidence, f"MCP servers configured: {', '.join(mcp)}")
+    else:
+        gaps.append("No MCP servers configured. This is acceptable if no external context/tools are needed.")
+        s = 7
+    if docs.get("files") and mcp:
+        docs_text_signal = any("mcp" in p.lower() for p in docs.get("files", []))
+        if docs_text_signal:
+            s = add(s, 1, evidence, "MCP-related docs/file names detected.")
+        else:
+            gaps.append("MCP servers exist but no obvious MCP documentation file name detected.")
+            recs.append({"risk": "low", "title": "Document MCP purpose", "detail": "Document MCP server purpose, expected availability, auth/secrets, and failure mode."})
+    dims.append(dim("MCP Readiness", s, evidence, gaps, recs))
+
+    # 9 Hooks/rules
+    evidence, gaps, recs = [], [], []
+    s = 7
+    if codex.get("hooks"):
+        s = add(s, 2, evidence, "Hooks config detected.")
+    else:
+        evidence.append("No hooks config detected; absence is safe if hooks are not needed.")
+    if codex.get("rules"):
+        s = add(s, 1, evidence, f"Codex rules detected: {len(codex.get('rules', []))} files.")
+    dims.append(dim("Hooks / Rules Safety", s, evidence, gaps, recs))
+
+    # 10 OMX
+    evidence, gaps, recs = [], [], []
+    s = 3
+    if omx.get("exists"):
+        s = add(s, 2, evidence, ".omx/ exists.")
+    else:
+        gaps.append("No .omx/ workflow artifacts detected.")
+    if omx.get("contexts"):
+        s = add(s, 2, evidence, f"OMX context files: {len(omx.get('contexts', []))}.")
+    if omx.get("plans"):
+        s = add(s, 2, evidence, f"OMX plan files: {len(omx.get('plans', []))}.")
+    if docs.get("files") and any("worktree" in p.lower() or "agent" in p.lower() for p in docs.get("files", [])):
+        s = add(s, 1, evidence, "Agent/worktree workflow docs detected.")
+    dims.append(dim("Subagent / OMX Workflow", s, evidence, gaps, recs))
+
+    # 11 Cross-agent compatibility
+    evidence, gaps, recs = [], [], []
+    cross = inv.get("cross_agent", {}).get("surfaces", [])
+    s = 7
+    if cross:
+        s = add(s, 1, evidence, f"Cross-agent surfaces detected: {', '.join(x['path'] for x in cross)}")
+        gaps.append("Cross-agent files should be checked for conflicts with Codex/OMX guidance.")
+        recs.append({"risk": "low", "title": "Audit cross-agent instructions", "detail": "Ensure Claude/Cursor/etc. guidance does not conflict with Codex/OMX rules."})
+    else:
+        evidence.append("No cross-agent instruction surfaces detected.")
+    dims.append(dim("Cross-Agent Compatibility", s, evidence, gaps, recs))
+
+    # 12 Entropy/scaffolding
+    evidence, gaps, recs = [], [], []
+    counts = markers.get("counts", {})
+    total_markers = sum(int(v) for v in counts.values()) if counts else 0
+    s = 8
+    if total_markers == 0:
+        s = add(s, 1, evidence, "No scaffold/legacy marker hits detected.")
+    elif total_markers < 50:
+        evidence.append(f"Detected {total_markers} scaffold/legacy marker hits.")
+        s -= 1
+    elif total_markers < 250:
+        evidence.append(f"Detected {total_markers} scaffold/legacy marker hits.")
+        gaps.append("Moderate scaffold/legacy marker entropy detected.")
+        s -= 3
+    else:
+        evidence.append(f"Detected {total_markers} scaffold/legacy marker hits.")
+        gaps.append("High scaffold/legacy marker entropy detected.")
+        s -= 5
+    if docs.get("generated_policy_docs"):
+        s = add(s, 1, evidence, "Generated artifact lifecycle guidance detected.")
+    else:
+        gaps.append("No generated artifact lifecycle policy detected.")
+        recs.append({"risk": "low", "title": "Add generated artifact policy", "detail": "Classify checked-in reports/golden data/generated outputs as active evidence, generated on demand, archive, or delete."})
+    dims.append(dim("Entropy / Scaffolding Control", s, evidence, gaps, recs))
+
+    # 13 Production readiness
+    evidence, gaps, recs = [], [], []
+    s = 0
+    # Aggregate selected dimensions.
+    partial_scores = {d["name"]: d["score"] for d in dims}
+    selected = [
+        "Agent Legibility", "Instruction Hygiene", "Docs Authority", "Validation Truth",
+        "Harness Feedback Loops", "Entropy / Scaffolding Control"
+    ]
+    avg = round(sum(partial_scores.get(x, 0) for x in selected) / len(selected)) if selected else 0
+    s = avg
+    evidence.append(f"Production readiness derived from core readiness average: {avg}/10.")
+    if avg < 7:
+        gaps.append("Core harness readiness dimensions are not yet consistently strong.")
+    if any_script(manifests, ["validate", "test", "build"]):
+        evidence.append("Build/test/validate commands are present.")
+    else:
+        gaps.append("No clear build/test/validate command surface detected.")
+    dims.append(dim("Production Readiness", s, evidence, gaps, recs))
+
+    overall = round(sum(d["score"] for d in dims) / len(dims), 2)
+    verdict = "excellent" if overall >= 9 else "strong" if overall >= 7 else "partial" if overall >= 5 else "weak" if overall >= 3 else "missing"
+
+    low_risk = []
+    medium_risk = []
+    high_risk = []
+    for d in dims:
+        for rec in d.get("recommendations", []):
+            rec = dict(rec)
+            rec["dimension"] = d["name"]
+            risk = rec.get("risk", "medium")
+            if risk == "low":
+                low_risk.append(rec)
+            elif risk == "high":
+                high_risk.append(rec)
+            else:
+                medium_risk.append(rec)
+
+    # Always include a conservative set of potential next steps if weak areas exist.
+    if overall < 8 and not low_risk:
+        low_risk.append({
+            "risk": "low",
+            "dimension": "General",
+            "title": "Create harness-engineering improvement plan",
+            "detail": "Use this audit as input to an OMX deep-interview and ralplan pass before implementing changes."
+        })
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "overall_score": overall,
+        "overall_status": verdict,
+        "dimensions": dims,
+        "recommendations": {
+            "low_risk": low_risk,
+            "medium_risk": medium_risk,
+            "high_risk": high_risk,
+        },
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Score a harness-engineering inventory JSON file.")
+    parser.add_argument("inventory", help="Path to inventory JSON")
+    parser.add_argument("--out", help="Write scorecard JSON to this file")
+    parser.add_argument("--pretty", action="store_true")
+    args = parser.parse_args()
+
+    inventory = json.loads(Path(args.inventory).read_text(encoding="utf-8"))
+    scorecard = score_inventory(inventory)
+    text = json.dumps(scorecard, indent=2 if args.pretty else None, sort_keys=True)
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(text + "\n", encoding="utf-8")
+    else:
+        print(text)
+
+
+if __name__ == "__main__":
+    main()

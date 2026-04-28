@@ -1,0 +1,10 @@
+[project]
+name = "harness-engineering-audit-skill-repo"
+version = "0.1.0"
+description = "GitHub-hosted Codex skill for harness engineering audits."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

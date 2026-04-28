@@ -1,0 +1,20 @@
+{
+  "name": "harness-engineering-audit-marketplace",
+  "interface": {
+    "displayName": "Harness Engineering Audit"
+  },
+  "plugins": [
+    {
+      "name": "harness-engineering-audit",
+      "source": {
+        "source": "local",
+        "path": "./plugins/harness-engineering-audit"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

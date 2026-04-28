@@ -1,0 +1,4 @@
+name: harness-engineering-audit
+description: Audit a repository for OpenAI-style harness engineering and Codex/OMX readiness across AGENTS.md, Codex config, skills, MCP, hooks, subagents, docs authority, validation commands, generated artifacts, and production agentic workflow.
+version: 0.1.0
+allow_implicit_invocation: true
