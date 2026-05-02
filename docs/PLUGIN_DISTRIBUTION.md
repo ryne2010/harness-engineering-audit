@@ -33,7 +33,7 @@ For published distribution, prefer a Git-backed source:
     "source": "git-subdir",
     "url": "https://github.com/ryne2010/harness-engineering-audit.git",
     "path": "./plugins/harness-engineering-audit",
-    "ref": "v0.1.1"
+    "ref": "v0.2.0"
   }
 }
 ```

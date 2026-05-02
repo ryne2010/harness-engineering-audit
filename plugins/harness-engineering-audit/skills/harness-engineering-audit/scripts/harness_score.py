@@ -22,6 +22,7 @@ DIMENSIONS = [
     "Cross-Agent Compatibility",
     "Entropy / Scaffolding Control",
     "Production Readiness",
+    "Symphony Orchestration Readiness",
 ]
 
 
@@ -99,7 +100,12 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         s = add(s, 2, evidence, f"Found {len(instructions)} AGENTS instruction file(s).")
     else:
         gaps.append("No AGENTS.md files found.")
-        recs.append({"risk": "low", "title": "Add concise root AGENTS.md", "detail": "Create a map-like root AGENTS.md with commands, constraints, and docs pointers."})
+        recs.append({
+            "risk": "low",
+            "priority": "p0",
+            "title": "Add concise root AGENTS.md",
+            "detail": "Create a map-like root AGENTS.md with commands, constraints, docs pointers, and scoped instruction rules as the first harness fix.",
+        })
     if docs.get("exists"):
         s = add(s, 2, evidence, f"docs/ exists with {len(docs.get('files', []))} markdown file(s).")
     else:
@@ -123,18 +129,49 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     root_agents = [x for x in instructions if x.get("path") == "AGENTS.md"]
     if root_agents:
         root = root_agents[0]
+        root_gaps = []
+        if not root.get("has_commands"):
+            root_gaps.append("validation/build commands")
+        if not root.get("mentions_docs"):
+            root_gaps.append("docs/source-of-truth pointers")
+        if not root.get("mentions_validation"):
+            root_gaps.append("validation expectations")
+        if root_gaps:
+            gaps.append(f"Root AGENTS.md is missing: {', '.join(root_gaps)}.")
+            recs.append({
+                "risk": "low",
+                "priority": "p0",
+                "title": "Refresh root AGENTS.md operating map",
+                "detail": "Auto-approved first pass: update root AGENTS.md with repo purpose, authoritative docs, validation commands, constraints, and nested AGENTS scope rules without duplicating long-form docs.",
+            })
         if root.get("bytes", 0) <= 16_384:
             s = add(s, 2, evidence, "Root AGENTS.md is within the strict 16 KiB target.")
         elif root.get("bytes", 0) <= 32_768:
             s = add(s, 1, evidence, "Root AGENTS.md is under 32 KiB but may be too heavy for hot-path use.")
             gaps.append("Root AGENTS.md exceeds strict 16 KiB map-like target.")
-            recs.append({"risk": "low", "title": "Trim root AGENTS.md", "detail": "Move detailed role/process content into docs and keep root AGENTS as a routing map."})
+            recs.append({
+                "risk": "low",
+                "priority": "p0",
+                "title": "Trim root AGENTS.md",
+                "detail": "Auto-approved first pass: move detailed role/process content into docs and keep root AGENTS as a routing map.",
+            })
         else:
             gaps.append("Root AGENTS.md is larger than 32 KiB and likely too large for hot-path guidance.")
-            recs.append({"risk": "low", "title": "Shrink root AGENTS.md", "detail": "Convert root AGENTS.md into a concise map and move details to docs."})
+            recs.append({
+                "risk": "low",
+                "priority": "p0",
+                "title": "Shrink root AGENTS.md",
+                "detail": "Auto-approved first pass: convert root AGENTS.md into a concise map and move details to docs.",
+            })
             s -= 2
     else:
         gaps.append("No root AGENTS.md found.")
+        recs.append({
+            "risk": "low",
+            "priority": "p0",
+            "title": "Create root AGENTS.md operating map",
+            "detail": "Auto-approved first pass: add a concise root AGENTS.md that points to authoritative docs, validation commands, constraints, and nested instruction scope rules.",
+        })
     duplicate_big = [x for x in instructions if x.get("bytes", 0) > 32_768]
     if not duplicate_big:
         s = add(s, 1, evidence, "No AGENTS files exceed 32 KiB.")
@@ -143,6 +180,8 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     nested = [x for x in instructions if x.get("path") != "AGENTS.md"]
     if nested:
         s = add(s, 1, evidence, f"Found scoped nested instruction file(s): {', '.join(x['path'] for x in nested[:5])}")
+    else:
+        gaps.append("No nested AGENTS.md files detected; verify whether subtrees need scoped instructions.")
     dims.append(dim("Instruction Hygiene", s, evidence, gaps, recs))
 
     # 3 Docs Authority
@@ -342,6 +381,42 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         gaps.append("No clear build/test/validate command surface detected.")
     dims.append(dim("Production Readiness", s, evidence, gaps, recs))
 
+
+
+    # 14 Symphony orchestration readiness
+    evidence, gaps, recs = [], [], []
+    symphony = inv.get("symphony_readiness", {})
+    categories = symphony.get("categories", {}) if isinstance(symphony, dict) else {}
+    category_status = symphony.get("category_status", {}) if isinstance(symphony, dict) else {}
+    s = 0
+    checks = [
+        ("workflow_contracts", "Workflow / agent contracts are discoverable."),
+        ("task_state_surfaces", "Task-state or control-plane surfaces are discoverable."),
+        ("workspace_isolation", "Workspace isolation guidance is discoverable."),
+        ("agent_runner_guidance", "Agent runner / CLI guidance is discoverable."),
+        ("observability", "Observability or evidence-reporting surfaces are discoverable."),
+        ("validation_guardrails", "Validation / CI guardrails are discoverable."),
+        ("recovery_guardrails", "Recovery / resume / rollback guardrails are discoverable."),
+    ]
+    for key, message in checks:
+        paths = categories.get(key, []) if isinstance(categories, dict) else []
+        if category_status.get(key) or paths:
+            s += 1
+            evidence.append(f"{message} Examples: {', '.join(paths[:5])}")
+        else:
+            gaps.append(f"Missing Symphony readiness signal: {key.replace('_', ' ')}.")
+    # Scale seven static categories to a 10-point dimension, preserving strictness.
+    s = round((s / len(checks)) * 10) if checks else 0
+    if gaps:
+        recs.append({
+            "risk": "low",
+            "title": "Plan Symphony readiness improvements",
+            "detail": "Use the Symphony readiness findings to add missing workflow contracts, task-state handoffs, workspace isolation guidance, observability, validation, and recovery guardrails before adopting a live orchestrator.",
+        })
+    if not categories:
+        gaps.append("No Symphony readiness inventory was collected.")
+    dims.append(dim("Symphony Orchestration Readiness", s, evidence, gaps, recs))
+
     overall = round(sum(d["score"] for d in dims) / len(dims), 2)
     verdict = "excellent" if overall >= 9 else "strong" if overall >= 7 else "partial" if overall >= 5 else "weak" if overall >= 3 else "missing"
 
@@ -354,19 +429,30 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
             rec["dimension"] = d["name"]
             risk = rec.get("risk", "medium")
             if risk == "low":
+                rec["auto_approved"] = True
+                rec.setdefault("approval", "auto-approved")
+                if "AGENTS" in f"{rec.get('title', '')} {rec.get('detail', '')}" or d["name"] == "Instruction Hygiene":
+                    rec.setdefault("priority", "p0")
                 low_risk.append(rec)
             elif risk == "high":
+                rec["auto_approved"] = False
+                rec.setdefault("approval", "explicit-approval-required")
                 high_risk.append(rec)
             else:
+                rec["auto_approved"] = False
+                rec.setdefault("approval", "review-required")
                 medium_risk.append(rec)
 
     # Always include a conservative set of potential next steps if weak areas exist.
     if overall < 8 and not low_risk:
         low_risk.append({
             "risk": "low",
+            "priority": "p1",
+            "auto_approved": True,
+            "approval": "auto-approved",
             "dimension": "General",
             "title": "Create harness-engineering improvement plan",
-            "detail": "Use this audit as input to an OMX deep-interview and ralplan pass before implementing changes."
+            "detail": "Use this audit as input to an OMX ralplan pass, then execute auto-approved low-risk changes without asking for another approval."
         })
 
     return {
@@ -374,6 +460,12 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         "overall_score": overall,
         "overall_status": verdict,
         "dimensions": dims,
+        "auto_approval_policy": {
+            "enabled": True,
+            "scope": "low-risk recommendations only",
+            "agents_priority": "AGENTS.md recommendations are P0 and should be handled before other low-risk fixes.",
+            "excluded": "Medium-risk and high-risk recommendations still require explicit approval.",
+        },
         "recommendations": {
             "low_risk": low_risk,
             "medium_risk": medium_risk,

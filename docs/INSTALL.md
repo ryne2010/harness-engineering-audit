@@ -13,7 +13,7 @@ gh skill install ryne2010/harness-engineering-audit \
 
 ```bash
 gh skill install ryne2010/harness-engineering-audit \
-  skills/harness-engineering-audit@v0.1.1 \
+  skills/harness-engineering-audit@v0.2.0 \
   --agent codex \
   --scope project
 ```
@@ -22,7 +22,7 @@ gh skill install ryne2010/harness-engineering-audit \
 
 ```bash
 gh skill install ryne2010/harness-engineering-audit \
-  skills/harness-engineering-audit@v0.1.1 \
+  skills/harness-engineering-audit@v0.2.0 \
   --agent codex \
   --scope user
 ```

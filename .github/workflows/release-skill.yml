@@ -105,7 +105,7 @@ jobs:
 
           git fetch --tags --force
 
-          BASE_MINOR="v0.1"
+          BASE_MINOR="v0.2"
           latest="$(git tag -l "${BASE_MINOR}.*" --sort=-v:refname | head -n 1 || true)"
 
           if [ -z "$latest" ]; then

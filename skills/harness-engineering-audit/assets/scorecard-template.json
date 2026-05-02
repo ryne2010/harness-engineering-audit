@@ -12,8 +12,13 @@
     "Subagent / OMX Workflow",
     "Cross-Agent Compatibility",
     "Entropy / Scaffolding Control",
-    "Production Readiness"
+    "Production Readiness",
+    "Symphony Orchestration Readiness"
   ],
   "score_scale": "0-10",
-  "recommendation_risk_levels": ["low", "medium", "high"]
+  "recommendation_risk_levels": [
+    "low",
+    "medium",
+    "high"
+  ]
 }

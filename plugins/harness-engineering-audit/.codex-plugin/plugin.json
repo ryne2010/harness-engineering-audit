@@ -1,7 +1,7 @@
 {
   "name": "harness-engineering-audit",
-  "version": "0.1.1",
-  "description": "Audit repositories for OpenAI-style harness engineering and Codex/OMX readiness.",
+  "version": "0.2.0",
+  "description": "Audit repositories for OpenAI-style harness engineering, Codex/OMX readiness, and approval-gated stack/tool upgrade recommendations.",
   "author": {
     "name": "Ryne Schroder"
   },
@@ -19,7 +19,7 @@
   "interface": {
     "displayName": "Harness Engineering Audit",
     "shortDescription": "Audit repos for agentic development readiness.",
-    "longDescription": "Scores AGENTS.md, Codex config, skills, MCP, hooks, rules, docs authority, validation truth, OMX workflow, and production readiness for AI-driven development.",
+    "longDescription": "Scores AGENTS.md, Codex config, skills, MCP, hooks, rules, docs authority, validation truth, OMX workflow, Symphony readiness, and approval-gated stack/tool upgrade recommendations for AI-driven development.",
     "developerName": "Ryne Schroder",
     "category": "Developer Tools",
     "capabilities": [
@@ -28,7 +28,7 @@
     "websiteURL": "https://github.com/ryne2010/harness-engineering-audit",
     "defaultPrompt": [
       "Use Harness Engineering Audit to assess this repo for Codex/OMX readiness.",
-      "Run the harness engineering audit and produce an OMX handoff report."
+      "Run the harness engineering audit and produce an OMX handoff plus approval-gated upgrade recommendations."
     ]
   }
 }

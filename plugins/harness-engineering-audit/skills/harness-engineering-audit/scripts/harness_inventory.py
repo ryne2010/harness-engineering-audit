@@ -297,6 +297,116 @@ def validation_docs(root: Path) -> List[str]:
     return sorted(set(candidates))[:500]
 
 
+
+def unique_sorted(values: Iterable[str], limit: int = 500) -> List[str]:
+    """Return deterministic unique path lists with a bounded size."""
+    return sorted(set(values))[:limit]
+
+
+def text_contains_any(path: Path, keywords: Iterable[str], limit: int = 300_000) -> bool:
+    text = read_text(path, limit=limit)
+    if not text:
+        return False
+    lower = text.lower()
+    return any(keyword.lower() in lower for keyword in keywords)
+
+
+def find_text_signal_paths(root: Path, keywords: Iterable[str], limit: int = 50) -> List[str]:
+    matches: List[str] = []
+    for path in iter_files(root):
+        if len(matches) >= limit:
+            break
+        if text_contains_any(path, keywords):
+            matches.append(rel(path, root))
+    return unique_sorted(matches, limit=limit)
+
+
+def find_symphony_readiness(root: Path) -> Dict[str, Any]:
+    """Collect static signals for OpenAI Symphony-style orchestration readiness.
+
+    This is intentionally a static harness audit. It does not call Linear/GitHub APIs,
+    start agent sessions, or inspect private credentials. The goal is to determine
+    whether a repository exposes the contracts and guardrails a Symphony-like control
+    plane would need before a later adoption plan.
+    """
+    workflow_contracts = find_paths(
+        root,
+        [
+            "AGENTS.md",
+            "AGENTS.override.md",
+            "WORKFLOW.md",
+            ".codex/config.toml",
+            ".codex/hooks.json",
+            "docs/OMX_WORKFLOW.md",
+            "docs/USAGE.md",
+            ".github/ISSUE_TEMPLATE",
+            ".github/pull_request_template.md",
+        ],
+    )
+    workflow_contracts.extend(find_text_signal_paths(root, ["workflow", "handoff", "control plane"], limit=25))
+
+    task_state_surfaces = find_paths(
+        root,
+        [
+            ".omx/state",
+            ".omx/plans",
+            ".omx/context",
+            ".codex/reports",
+            ".github/ISSUE_TEMPLATE",
+            ".github/PULL_REQUEST_TEMPLATE.md",
+        ],
+    )
+    task_state_surfaces.extend(
+        find_text_signal_paths(root, ["linear", "issue", "ticket", "task", "status", "next-step"], limit=35)
+    )
+
+    workspace_isolation = find_text_signal_paths(
+        root,
+        ["workspace", "worktree", "sandbox", "isolated", "per-issue", "per issue", "tmux"],
+        limit=35,
+    )
+    agent_runner_guidance = find_text_signal_paths(
+        root,
+        ["codex", "agent", "omx", "mcp", "skill", "prompt", "gh cli", "subagent"],
+        limit=45,
+    )
+    observability = find_paths(root, [".omx/logs", ".codex/reports", "docs/TRACE.md"])
+    observability.extend(find_text_signal_paths(root, ["log", "trace", "status", "hud", "report", "evidence"], limit=35))
+    validation_guardrails = validation_docs(root)
+    validation_guardrails.extend(find_text_signal_paths(root, VALIDATION_KEYWORDS, limit=35))
+    recovery_guardrails = find_text_signal_paths(
+        root,
+        ["retry", "restart", "resume", "recover", "rollback", "cancel", "stale", "reconcile", "state"],
+        limit=35,
+    )
+
+    categories = {
+        "workflow_contracts": unique_sorted(workflow_contracts, limit=60),
+        "task_state_surfaces": unique_sorted(task_state_surfaces, limit=60),
+        "workspace_isolation": unique_sorted(workspace_isolation, limit=60),
+        "agent_runner_guidance": unique_sorted(agent_runner_guidance, limit=80),
+        "observability": unique_sorted(observability, limit=60),
+        "validation_guardrails": unique_sorted(validation_guardrails, limit=80),
+        "recovery_guardrails": unique_sorted(recovery_guardrails, limit=60),
+    }
+    category_status = {name: bool(paths) for name, paths in categories.items()}
+    readiness_count = sum(1 for ready in category_status.values() if ready)
+    return {
+        "schema": "harness-engineering-audit.symphony-readiness.v1",
+        "static_only": True,
+        "non_goals": [
+            "no daemon/service execution",
+            "no live tracker API calls",
+            "no target-repo auto-modification",
+            "no reference implementation setup",
+        ],
+        "categories": categories,
+        "category_status": category_status,
+        "readiness_count": readiness_count,
+        "category_count": len(categories),
+    }
+
+
 def collect_inventory(repo: str | Path) -> Dict[str, Any]:
     root = Path(repo).resolve()
     files = list(iter_files(root)) if root.exists() else []
@@ -315,6 +425,7 @@ def collect_inventory(repo: str | Path) -> Dict[str, Any]:
         "generated_artifacts": generated_artifacts(root),
         "validation_docs": validation_docs(root),
         "markers": marker_scan(root),
+        "symphony_readiness": find_symphony_readiness(root),
     }
     return inventory
 

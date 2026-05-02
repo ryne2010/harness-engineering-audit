@@ -11,7 +11,7 @@ gh skill publish --dry-run
 ## Publish a release
 
 ```bash
-gh skill publish --tag v0.1.1
+gh skill publish --tag v0.2.0
 ```
 
 ## Test install
@@ -25,7 +25,7 @@ git add README.md
 git commit -m "init"
 
 gh skill install ryne2010/harness-engineering-audit \
-  skills/harness-engineering-audit@v0.1.1 \
+  skills/harness-engineering-audit@v0.2.0 \
   --agent codex \
   --scope project
 

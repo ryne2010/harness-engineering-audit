@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.0
+
+- Adds stack detection, installed tooling inventory, and approval-gated upgrade recommendations.
+- Writes `stack-inventory.json`, `tool-inventory.json`, `upgrade-recommendations.*`, `web-verification-queue.json`, and `source-trust-policy.md`.
+- Defaults to recommendation reports with web verification requested, honest `web_verified: false` local-script status, required human approval, and no install/config mutation.
+- Suppresses external recommendations when native Codex/OMX capabilities already cover the capability.
+- Adds a `$ralplan` prompt for approval-gated tool upgrade planning and extends smoke validation.
+
 ## v0.1.1
 
 - Adds missing docs referenced by the root README.

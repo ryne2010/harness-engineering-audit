@@ -8,16 +8,16 @@ license: MIT
 
 Use this skill to turn a repository into a production-ready, agent-legible engineering environment optimized for Codex, OMX, and long-running AI-assisted development.
 
-This skill is **audit-first**. It may generate reports and planning artifacts, but it must not modify source files, docs, config, hooks, MCP servers, skills, or CI without a separately approved execution plan.
+This skill is **audit-first, AGENTS-first, and low-risk auto-approved**. It may generate reports and planning artifacts before edits, then low-risk recommendations from the audit are approved for follow-up execution without another user approval. Medium/high-risk changes still require explicit approval.
 
 ## Core operating model
 
 1. Inspect the repo and collect evidence.
 2. Score the repo against the harness-engineering rubric.
 3. Produce a strict report with low/medium/high-risk recommendations.
-4. Generate an OMX handoff artifact for planning.
-5. Ask for explicit approval before proposing implementation.
-6. Use OMX planning/execution for approved fixes.
+4. Generate AGENTS.md priority and OMX handoff artifacts.
+5. Auto-approve low-risk fixes, with root `AGENTS.md` as P0 when it is missing, oversized, stale, or lacks docs/validation pointers.
+6. Use OMX planning/execution for auto-approved low-risk fixes; defer medium/high-risk changes until explicit approval.
 
 The default report location is:
 
@@ -45,6 +45,7 @@ Use this skill when a user asks to audit or improve:
 - validation commands
 - command registries
 - generated artifact policy
+- stack/tooling upgrade recommendations
 - scaffolding/legacy entropy
 - repo legibility for AI agents
 - production-readiness for agent-first development
@@ -99,11 +100,37 @@ The script writes:
 .codex/reports/harness-engineering-audit/
   inventory.json
   scorecard.json
+  stack-inventory.json
+  tool-inventory.json
+  upgrade-recommendations.json
+  upgrade-recommendations.md
+  web-verification-queue.json
+  source-trust-policy.md
   report.md
   findings.md
   recommended-fixes.md
+  agents-priority.md
   omx-handoff.md
+  next-step.md
+  next-step.json
+  prompts/
+    deep-interview.md
+    ralplan.md
+    team.md
+    ralph.md
+    symphony-adoption.md
+    tool-upgrade-ralplan.md
 ```
+
+Recommendation defaults are intentionally conservative:
+
+- recommend tools: true
+- web verification requested: true
+- human approval gate: required
+- install/config mutation: false
+- write reports: true
+
+Local Python scripts cannot browse. They therefore write a web verification queue and keep `web_verified: false` until a browsing-capable human/agent records evidence. Generated install/config/validation/rollback commands are inert handoff text and must not be executed without explicit approval.
 
 Use a custom output directory only when needed:
 
@@ -128,6 +155,7 @@ The report scores:
 11. Cross-Agent Compatibility
 12. Entropy / Scaffolding Control
 13. Production Readiness
+14. Symphony Orchestration Readiness
 
 Scores are strict and intentionally opinionated. A score is not a final truth; it is an evidence-backed signal to guide planning.
 
@@ -137,9 +165,11 @@ Classify every recommendation by confidence and risk.
 
 ### Low-risk / high-confidence
 
-Good candidates for an approved OMX plan:
+Auto-approved by default for an OMX follow-up pass. AGENTS.md items are P0 and should be handled first:
 
 - trim duplicated root `AGENTS.md` content
+- add or refresh concise root `AGENTS.md` with docs and validation pointers
+- preserve or clarify nested `AGENTS.md` scope boundaries
 - add missing docs index links
 - document real validation commands
 - add a command registry
@@ -152,7 +182,7 @@ Good candidates for an approved OMX plan:
 
 ### Medium-risk
 
-Requires plan and review:
+Requires explicit approval before execution:
 
 - restructure docs folders
 - add or change MCP servers
@@ -173,18 +203,46 @@ Do not execute without explicit approval:
 - alter subagent/team workflow semantics
 - change security or sandbox settings
 
+## Low-typing OMX continuation
+
+Do **not** make the user copy or retype the long suggested prompts.
+
+After the audit script runs:
+
+1. Read `report.md` enough to present the summary required below.
+2. Use `next-step.json` / `next-step.md` to identify the default next stage.
+3. In an interactive OMX runtime, present a structured selection:
+   - **Plan auto-approved fixes** (default/recommended)
+   - **Execute auto-approved fixes** (only if an execution-ready plan already exists)
+   - **Review risky questions** (only for medium/high-risk ambiguity)
+   - **Stop after audit**
+4. If the user selects a stage, continue in the same session with the corresponding generated prompt file in `prompts/`; do not ask them to paste the command.
+5. If no structured selection UI is available, print only the short resume command: `$harness-engineering-audit continue`.
+
+When the user runs `$harness-engineering-audit continue`, inspect `.codex/reports/harness-engineering-audit/next-step.json`. If it exists, resume from its default/recommended stage or present the same selection. If it does not exist, run the audit first.
+
+## AGENTS.md priority lane
+
+Treat `AGENTS.md` improvements as first-class harness fixes:
+
+- Root `AGENTS.md` is P0 when missing, larger than the concise hot-path target, missing validation commands, missing docs/source-of-truth pointers, or missing nested instruction scope guidance.
+- Low-risk AGENTS.md changes are auto-approved. Do not wait for another approval to add, trim, or refresh root `AGENTS.md` as a concise operating map.
+- Keep root `AGENTS.md` map-like. Move detailed process prose into docs and link to it.
+- Preserve nested AGENTS semantics. Do not delete nested instruction files without explicit approval.
+- Do not change hooks, MCP, CI, package scripts, security/sandbox settings, source structure, or delete scaffolding as part of the auto-approved AGENTS.md lane.
+
 ## OMX handoff workflow
 
-After generating `omx-handoff.md`, use this flow:
+After generating `omx-handoff.md`, the generated prompt files encode this flow:
 
 ```text
-$deep-interview "Read .codex/reports/harness-engineering-audit/omx-handoff.md and conduct a harness-engineering deep review. Ask only questions that affect architecture, validation truth, repo instruction surfaces, or execution risk."
+$ralplan "Read .codex/reports/harness-engineering-audit/prompts/ralplan.md and follow it."
 
-$ralplan "Read the audit report and interview output. Produce .omx/plans/prd-harness-engineering-audit.md and .omx/plans/test-spec-harness-engineering-audit.md. Planning must distinguish low-risk fixes, medium-risk review items, and high-risk deferred work."
+$team "Read .codex/reports/harness-engineering-audit/prompts/team.md and follow it."
 
-$team "Execute only approved low-risk fixes from the harness-engineering plan. Keep root AGENTS map-like, preserve repo-specific docs, update validation evidence, and do not modify risky config without approval."
+$ralph "Read .codex/reports/harness-engineering-audit/prompts/ralph.md and follow it."
 
-$ralph "Verify the harness-engineering cleanup. Final output must include what changed, validation run, remaining risk, and stop/no-stop recommendation."
+$deep-interview "Read .codex/reports/harness-engineering-audit/prompts/deep-interview.md and follow it." # only for medium/high-risk questions
 ```
 
 ## Output discipline
@@ -195,9 +253,9 @@ When presenting results, include:
 - score summary
 - strongest surfaces
 - weakest surfaces
-- low-risk approved-candidate fixes
+- auto-approved low-risk fixes, especially AGENTS.md P0 items
 - medium/high-risk deferred recommendations
 - report path
-- next OMX command to run
+- next OMX selection/resume command
 
 Do not claim the repo is production-ready unless validation truth, instruction hygiene, docs authority, and feedback loops are all strong and evidenced.

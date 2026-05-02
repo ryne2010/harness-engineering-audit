@@ -8,7 +8,11 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, List
 
+from recommend_tools import DEFAULT_POLICY, QUEUE_SCHEMA, SOURCE_TRUST_POLICY
+
 REPORT_MARKER = ".harness_engineering_audit_report_dir"
+PROMPT_DIR = "prompts"
+NEXT_STEP_FILE = "next-step.json"
 
 
 def safe_prepare_output_dir(out_dir: Path, force: bool = False) -> None:
@@ -41,8 +45,66 @@ def rec_list(recs: List[Dict[str, Any]]) -> str:
         title = r.get("title", "Recommendation")
         detail = r.get("detail", "")
         risk = r.get("risk", "unknown")
-        lines.append(f"- **[{risk}] {dim}: {title}** — {detail}")
+        flags = []
+        if r.get("priority"):
+            flags.append(str(r["priority"]).upper())
+        if r.get("auto_approved"):
+            flags.append("auto-approved")
+        flag_text = f" ({', '.join(flags)})" if flags else ""
+        lines.append(f"- **[{risk}] {dim}: {title}**{flag_text} — {detail}")
     return "\n".join(lines)
+
+
+def display_path(path: Path, repo_root: Path) -> str:
+    """Return a path that is stable from the audited repo root when possible."""
+    resolved = path.resolve()
+    try:
+        return str(resolved.relative_to(repo_root.resolve()))
+    except ValueError:
+        return str(resolved)
+
+
+def build_path_context(inventory: Dict[str, Any], out_dir: Path) -> Dict[str, str]:
+    repo_root = Path(str(inventory.get("repo_root") or ".")).resolve()
+    report_dir = out_dir.resolve()
+    prompts_dir = report_dir / PROMPT_DIR
+
+    def report_file(name: str) -> str:
+        return display_path(report_dir / name, repo_root)
+
+    def prompt_file(name: str) -> str:
+        return display_path(prompts_dir / name, repo_root)
+
+    return {
+        "repo_root": str(repo_root),
+        "report_dir": display_path(report_dir, repo_root),
+        "prompts_dir": display_path(prompts_dir, repo_root),
+        "inventory": report_file("inventory.json"),
+        "scorecard": report_file("scorecard.json"),
+        "report": report_file("report.md"),
+        "findings": report_file("findings.md"),
+        "recommended_fixes": report_file("recommended-fixes.md"),
+        "agents_priority": report_file("agents-priority.md"),
+        "omx_handoff": report_file("omx-handoff.md"),
+        "next_step_md": report_file("next-step.md"),
+        "next_step_json": report_file(NEXT_STEP_FILE),
+        "deep_interview_prompt": prompt_file("deep-interview.md"),
+        "ralplan_prompt": prompt_file("ralplan.md"),
+        "team_prompt": prompt_file("team.md"),
+        "ralph_prompt": prompt_file("ralph.md"),
+        "symphony_adoption_prompt": prompt_file("symphony-adoption.md"),
+        "tool_upgrade_prompt": prompt_file("tool-upgrade-ralplan.md"),
+        "stack_inventory": report_file("stack-inventory.json"),
+        "tool_inventory": report_file("tool-inventory.json"),
+        "upgrade_recommendations_json": report_file("upgrade-recommendations.json"),
+        "upgrade_recommendations_md": report_file("upgrade-recommendations.md"),
+        "web_verification_queue": report_file("web-verification-queue.json"),
+        "source_trust_policy": report_file("source-trust-policy.md"),
+    }
+
+
+def prompt_command(skill: str, prompt_path: str) -> str:
+    return f'{skill} "Read {prompt_path} and follow it."'
 
 
 def score_table(scorecard: Dict[str, Any]) -> str:
@@ -66,7 +128,501 @@ def top_weaknesses(scorecard: Dict[str, Any]) -> List[str]:
     return out
 
 
-def render_main_report(inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
+def agents_priority_recommendations(scorecard: Dict[str, Any]) -> List[Dict[str, Any]]:
+    recs = []
+    for rec in scorecard.get("recommendations", {}).get("low_risk", []):
+        haystack = " ".join(
+            str(rec.get(k, "")) for k in ["dimension", "title", "detail", "priority"]
+        )
+        if "AGENTS" in haystack or rec.get("dimension") == "Instruction Hygiene":
+            recs.append(rec)
+    return sorted(recs, key=lambda r: (str(r.get("priority", "p9")), str(r.get("title", ""))))
+
+
+def render_stage_prompt(stage: str, paths: Dict[str, str]) -> str:
+    if stage == "deep-interview":
+        return f"""# Harness Engineering Audit Prompt: Deep Interview
+
+Run as: `$deep-interview`
+
+## Inputs
+
+Read `{paths['omx_handoff']}` first, then follow its referenced read order.
+
+## Task
+
+Conduct a strict harness-engineering deep review only for unresolved medium/high-risk questions.
+
+- Ask only questions that affect instruction surfaces, validation truth, Codex/OMX/MCP/skills/hooks safety, docs authority, generated artifact lifecycle, or execution risk.
+- Do not implement changes during the interview.
+- Prefer evidence-backed questions grounded in `{paths['report']}`, `{paths['findings']}`, and `{paths['recommended_fixes']}`.
+- Do not re-litigate auto-approved low-risk AGENTS.md fixes unless they would cross into risky config, CI, hook, MCP, source-structure, security, or deletion work.
+- End with a concise interview output that is ready for `$ralplan`.
+"""
+    if stage == "ralplan":
+        return f"""# Harness Engineering Audit Prompt: RALPLAN Auto-Approved Fixes
+
+Run as: `$ralplan`
+
+## Inputs
+
+- Audit report: `{paths['report']}`
+- Findings: `{paths['findings']}`
+- Recommended fixes: `{paths['recommended_fixes']}`
+- AGENTS.md priority lane: `{paths['agents_priority']}`
+- Scorecard: `{paths['scorecard']}`
+- Interview output from the current conversation or latest relevant `.omx/` artifact, if present
+
+## Task
+
+Produce:
+
+- `.omx/plans/prd-harness-engineering-audit.md`
+- `.omx/plans/test-spec-harness-engineering-audit.md`
+
+Planning must treat all low-risk recommendations in `{paths['recommended_fixes']}` as already approved for implementation. AGENTS.md recommendations are P0 and must be planned first.
+
+The plan must:
+
+- Start with root `AGENTS.md` improvements when any P0 AGENTS item exists.
+- Distinguish auto-approved low-risk immediate fixes from medium-risk review items and high-risk deferred work.
+- Include validation commands, rollback strategy, and explicit stop boundaries.
+- Avoid asking for another approval for low-risk changes; proceed to an execution-ready plan.
+"""
+    if stage == "team":
+        return f"""# Harness Engineering Audit Prompt: Team Execution
+
+Run as: `$team`
+
+## Inputs
+
+- Audit report: `{paths['report']}`
+- Recommended fixes: `{paths['recommended_fixes']}`
+- AGENTS.md priority lane: `{paths['agents_priority']}`
+- Approved or auto-approved PRD/test spec under `.omx/plans/`, when present
+
+## Task
+
+Execute the auto-approved low-risk fixes from the harness-engineering plan. If a plan is not present but `{paths['agents_priority']}` contains P0 items, perform a bounded AGENTS-first pass and write the missing plan/test-spec artifacts before or during execution.
+
+- Treat root `AGENTS.md` as the first file to improve when it is missing, oversized, stale, or lacks docs/validation pointers.
+- Keep root `AGENTS.md` concise and map-like; move detailed policy into docs instead of bloating the hot path.
+- Preserve repo-specific docs and source-of-truth boundaries.
+- Update validation evidence.
+- Do not modify risky config, hooks, MCP, CI, source structure, security/sandbox settings, or delete scaffolding without explicit approval.
+"""
+    if stage == "ralph":
+        return f"""# Harness Engineering Audit Prompt: Ralph Verification
+
+Run as: `$ralph`
+
+## Inputs
+
+- Audit report: `{paths['report']}`
+- Recommended fixes: `{paths['recommended_fixes']}`
+- Approved plan and execution output under `.omx/`
+
+## Task
+
+Verify the harness-engineering cleanup.
+
+- Confirm validation commands and evidence.
+- Report what changed.
+- Document remaining risks.
+- Provide a clear stop/no-stop recommendation.
+"""
+    if stage == "symphony-adoption":
+        return f"""# Harness Engineering Audit Prompt: Symphony Adoption Plan
+
+Run as: `$ralplan`
+
+## Inputs
+
+- Audit report: `{paths['report']}`
+- Findings: `{paths['findings']}`
+- Recommended fixes: `{paths['recommended_fixes']}`
+- Scorecard: `{paths['scorecard']}`
+- Inventory: `{paths['inventory']}`
+
+## Task
+
+Create a Symphony adoption plan from the static readiness findings. Preserve the first-pass boundaries from the audit skill:
+
+- Do not build or launch a daemon in this planning pass.
+- Do not call live Linear/GitHub APIs or require tracker credentials.
+- Do not auto-modify the target repository.
+- Do not install or wrap the openai/symphony reference implementation unless a later user explicitly approves it.
+
+The plan should identify missing workflow contracts, task-state handoffs, workspace isolation, agent runner guidance, observability/proof-of-work, validation, and recovery guardrails needed before adopting a Symphony-style issue-tracker control plane.
+"""
+    if stage == "tool-upgrade-ralplan":
+        return f"""# Harness Engineering Audit Prompt: Approval-Gated Tool Upgrade Plan
+
+Run as: `$ralplan`
+
+## Inputs
+
+- Upgrade recommendations: `{paths['upgrade_recommendations_md']}`
+- Machine-readable recommendations: `{paths['upgrade_recommendations_json']}`
+- Stack inventory: `{paths['stack_inventory']}`
+- Tool inventory: `{paths['tool_inventory']}`
+- Web verification queue: `{paths['web_verification_queue']}`
+- Source trust policy: `{paths['source_trust_policy']}`
+
+## Task
+
+Plan only. Do not install, configure, mutate source, or run generated install commands.
+
+- Verify current official/high-trust sources before approving any tooling action.
+- Prefer native Codex/OMX capabilities before external tools; keep suppressed recommendations suppressed unless the coverage is demonstrably insufficient.
+- Treat generated install/config/rollback commands as inert handoff text until a human explicitly approves a specific tool action.
+- Reject unverified community tools as actionable recommendations.
+- Produce a bounded PRD/test spec for the selected approved tooling slice, including validation and rollback.
+"""
+    raise ValueError(f"unknown stage: {stage}")
+
+
+def render_next_step_json(paths: Dict[str, str]) -> Dict[str, Any]:
+    stages = [
+        {
+            "stage": "ralplan",
+            "label": "Plan auto-approved fixes",
+            "skill": "$ralplan",
+            "prompt_file": paths["ralplan_prompt"],
+            "command": prompt_command("$ralplan", paths["ralplan_prompt"]),
+            "recommended": True,
+            "description": "Default next step after a fresh audit; turns auto-approved low-risk findings into an execution-ready plan with AGENTS.md first.",
+        },
+        {
+            "stage": "symphony-adoption",
+            "label": "Plan Symphony adoption",
+            "skill": "$ralplan",
+            "prompt_file": paths["symphony_adoption_prompt"],
+            "command": prompt_command("$ralplan", paths["symphony_adoption_prompt"]),
+            "recommended": False,
+            "description": "Use after reviewing Symphony readiness findings; creates a bounded adoption plan without daemon/tracker/reference setup.",
+        },
+        {
+            "stage": "tool-upgrade-ralplan",
+            "label": "Plan approval-gated tool upgrades",
+            "skill": "$ralplan",
+            "prompt_file": paths["tool_upgrade_prompt"],
+            "command": prompt_command("$ralplan", paths["tool_upgrade_prompt"]),
+            "recommended": False,
+            "description": "Use after reviewing stack/tool recommendations; verifies official sources and plans only the human-approved tooling slice.",
+        },
+        {
+            "stage": "team",
+            "label": "Execute auto-approved fixes",
+            "skill": "$team",
+            "prompt_file": paths["team_prompt"],
+            "command": prompt_command("$team", paths["team_prompt"]),
+            "recommended": False,
+            "description": "Use after the plan exists; execute low-risk fixes without another approval and prioritize root AGENTS.md.",
+        },
+        {
+            "stage": "ralph",
+            "label": "Verify cleanup",
+            "skill": "$ralph",
+            "prompt_file": paths["ralph_prompt"],
+            "command": prompt_command("$ralph", paths["ralph_prompt"]),
+            "recommended": False,
+            "description": "Use after execution to verify validation evidence and residual risk.",
+        },
+        {
+            "stage": "deep-interview",
+            "label": "Review risky questions",
+            "skill": "$deep-interview",
+            "prompt_file": paths["deep_interview_prompt"],
+            "command": prompt_command("$deep-interview", paths["deep_interview_prompt"]),
+            "recommended": False,
+            "description": "Use only when medium/high-risk findings need owner decisions before execution.",
+        },
+    ]
+    return {
+        "schema": "harness-engineering-audit.next-step.v1",
+        "default_stage": "ralplan",
+        "minimal_resume_command": "$harness-engineering-audit continue",
+        "report_dir": paths["report_dir"],
+        "agents_priority": paths["agents_priority"],
+        "omx_handoff": paths["omx_handoff"],
+        "stages": stages,
+    }
+
+
+def render_next_step_markdown(paths: Dict[str, str]) -> str:
+    next_step = render_next_step_json(paths)
+    lines = [
+        "# Harness Engineering Audit: Next Step",
+        "",
+        "Default next stage: **Plan auto-approved fixes**.",
+        "",
+        "Low-risk findings are auto-approved for the follow-up execution pass. AGENTS.md improvements are P0 and should be planned/executed first. Medium/high-risk findings still require explicit approval.",
+        "",
+        "In an interactive OMX session, the skill should present this as a selection so you do not need to copy or retype long prompts.",
+        "",
+        "If resuming later, type the short command:",
+        "",
+        "```text",
+        next_step["minimal_resume_command"],
+        "```",
+        "",
+        "## Prompt files",
+        "",
+    ]
+    for stage in next_step["stages"]:
+        lines.extend(
+            [
+                f"### {stage['label']}",
+                "",
+                f"- Skill: `{stage['skill']}`",
+                f"- Prompt file: `{stage['prompt_file']}`",
+                f"- Command, if you need it: `{stage['command']}`",
+                f"- When: {stage['description']}",
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_next_step_artifacts(paths: Dict[str, str], out_dir: Path) -> None:
+    prompts_dir = out_dir / PROMPT_DIR
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    for stage, filename in [
+        ("deep-interview", "deep-interview.md"),
+        ("ralplan", "ralplan.md"),
+        ("team", "team.md"),
+        ("ralph", "ralph.md"),
+        ("symphony-adoption", "symphony-adoption.md"),
+        ("tool-upgrade-ralplan", "tool-upgrade-ralplan.md"),
+    ]:
+        (prompts_dir / filename).write_text(render_stage_prompt(stage, paths), encoding="utf-8")
+    (out_dir / "next-step.md").write_text(render_next_step_markdown(paths), encoding="utf-8")
+    (out_dir / NEXT_STEP_FILE).write_text(
+        json.dumps(render_next_step_json(paths), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def default_upgrade_recommendations() -> Dict[str, Any]:
+    return {
+        "schema": "harness.upgrade-recommendations.v1",
+        "policy": dict(DEFAULT_POLICY),
+        "source_trust_policy": dict(SOURCE_TRUST_POLICY),
+        "catalog_last_reviewed": None,
+        "recommendations": [],
+        "suppressions": [],
+        "web_verification_queue": {
+            "schema": QUEUE_SCHEMA,
+            "generated_at": None,
+            "web_requested": DEFAULT_POLICY["web_requested"],
+            "web_verified": False,
+            "verification_mode": "static-catalog",
+            "entries": [],
+        },
+    }
+
+
+def command_block(commands: List[str]) -> str:
+    if not commands:
+        return "- None."
+    return "\n".join(f"- `{cmd}`" for cmd in commands)
+
+
+def render_upgrade_summary(upgrade_recommendations: Dict[str, Any], paths: Dict[str, str]) -> str:
+    policy = upgrade_recommendations.get("policy", {}) or {}
+    queue = upgrade_recommendations.get("web_verification_queue", {}) or {}
+    recs = upgrade_recommendations.get("recommendations", []) or []
+    suppressions = upgrade_recommendations.get("suppressions", []) or []
+    return f"""## Stack-Agnostic Upgrade Recommendations
+
+The audit now includes recommendation artifacts, but it still does **not** install tools, edit configuration, run generated setup commands, or claim live web verification from local scripts.
+
+- Recommend tools by default: `{policy.get('recommend_tools', True)}`
+- Web verification requested: `{policy.get('web_requested', True)}`
+- Web verification completed by this local script: `{queue.get('web_verified', False)}`
+- Human approval gate: `{policy.get('approval_gate', 'required')}`
+- Install/config mutation by audit: `{policy.get('install_config_mutation', False)}`
+- Actionable recommendations: {len(recs)}
+- Suppressed because native Codex/OMX coverage was detected: {len(suppressions)}
+
+Review the dedicated artifacts before planning any tooling action:
+
+- Stack inventory: `{paths['stack_inventory']}`
+- Tool inventory: `{paths['tool_inventory']}`
+- Recommendations: `{paths['upgrade_recommendations_md']}`
+- Web verification queue: `{paths['web_verification_queue']}`
+- Source trust policy: `{paths['source_trust_policy']}`
+
+Planning prompt:
+
+```text
+{prompt_command('$ralplan', paths['tool_upgrade_prompt'])}
+```
+"""
+
+
+def render_upgrade_recommendations_markdown(upgrade_recommendations: Dict[str, Any], paths: Dict[str, str]) -> str:
+    policy = upgrade_recommendations.get("policy", {}) or {}
+    queue = upgrade_recommendations.get("web_verification_queue", {}) or {}
+    recs = upgrade_recommendations.get("recommendations", []) or []
+    suppressions = upgrade_recommendations.get("suppressions", []) or []
+    lines = [
+        "# Upgrade Recommendations",
+        "",
+        "These recommendations are stack-agnostic, approval-gated, and report-only. Generated commands are inert handoff text; the audit does not execute installs or mutate configuration.",
+        "",
+        "## Policy",
+        "",
+        f"- Recommend tools: `{policy.get('recommend_tools', True)}`",
+        f"- Web verification requested: `{policy.get('web_requested', True)}`",
+        f"- Web verified by local script: `{queue.get('web_verified', False)}`",
+        f"- Verification mode: `{queue.get('verification_mode', 'static-catalog')}`",
+        f"- Human approval gate: `{policy.get('approval_gate', 'required')}`",
+        f"- Install/config mutation by audit: `{policy.get('install_config_mutation', False)}`",
+        "",
+        "## Source Trust Summary",
+        "",
+        f"See `{paths['source_trust_policy']}`. Tier 0/1 sources can be queued for human-verified planning; unverified community leads are not actionable by default.",
+        "",
+        "## Recommendations",
+        "",
+    ]
+    if not recs:
+        lines.append("- None.")
+    for rec in recs:
+        lines.extend(
+            [
+                f"### {rec.get('title', rec.get('id', 'Recommendation'))}",
+                "",
+                f"- ID: `{rec.get('id')}`",
+                f"- Capability gap: {rec.get('capability_gap')}",
+                f"- Benefit: {rec.get('expected_material_benefit')}",
+                f"- Trust tier: `{rec.get('trust_tier')}`",
+                f"- Source: {rec.get('source_url') or 'local proposal'}",
+                f"- Web verified: `{rec.get('web_verified', False)}`",
+                f"- Approval required: `{rec.get('approval_required', True)}`",
+                f"- Audit auto-approved: `{rec.get('audit_fix_auto_approved', False)}`",
+                f"- Install/config mutation by audit: `{rec.get('install_config_mutation', False)}`",
+                f"- Risk/confidence: `{rec.get('risk')}` / `{rec.get('confidence')}`",
+                "",
+                "Suggested install commands (do not execute without approval):",
+                "",
+                command_block(rec.get("install_commands", [])),
+                "",
+                "Suggested config commands (do not execute without approval):",
+                "",
+                command_block(rec.get("config_commands", [])),
+                "",
+                "Validation commands for an approved implementation:",
+                "",
+                command_block(rec.get("validation_commands", [])),
+                "",
+                "Rollback commands / strategy:",
+                "",
+                command_block(rec.get("rollback_commands", [])),
+                "",
+            ]
+        )
+    lines.extend(["## Suppressed Recommendations", ""])
+    if not suppressions:
+        lines.append("- None.")
+    for rec in suppressions:
+        lines.extend(
+            [
+                f"- **{rec.get('title', rec.get('id'))}** suppressed: {rec.get('suppression_reason')}",
+                f"  - Covered by: {', '.join(rec.get('covered_by', []) or ['unknown'])}",
+                f"  - Evidence: {', '.join(rec.get('evidence_paths', []) or ['none'])}",
+                f"  - Unsuppress if: {rec.get('unsuppress_if')}",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Web Verification Queue",
+            "",
+            f"Queue file: `{paths['web_verification_queue']}`",
+            "",
+            "Local Python execution cannot browse, so queued sources must be verified by a human or a browsing-capable agent before any install/config plan is approved.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_source_trust_policy(upgrade_recommendations: Dict[str, Any]) -> str:
+    policy = upgrade_recommendations.get("source_trust_policy", {}) or SOURCE_TRUST_POLICY
+    lines = [
+        "# Source Trust Policy",
+        "",
+        "The upgrade recommendation layer favors native Codex/OMX capabilities first, then official or high-trust ecosystem sources. It does not make unverified community tools actionable.",
+        "",
+    ]
+    for tier, description in policy.items():
+        lines.append(f"- **{tier}**: {description}")
+    lines.extend(
+        [
+            "",
+            "## Rules",
+            "",
+            "- Tier 0/1 sources may be proposed only with approval-required install/config/validation/rollback handoffs.",
+            "- Tier 2 discovery leads require primary-source verification and a human decision before becoming actionable.",
+            "- Tier 3 and blocked sources must not be recommended as installable tooling.",
+            "- Web verification status must remain honest: local report generation sets `web_verified: false` unless a browsing-capable verification step records evidence.",
+            "- Suppress external tooling when Codex/OMX already covers the capability unless the report records why native coverage is insufficient.",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_symphony_summary(inventory: Dict[str, Any], scorecard: Dict[str, Any], paths: Dict[str, str]) -> str:
+    symphony = inventory.get("symphony_readiness", {}) or {}
+    categories = symphony.get("categories", {}) or {}
+    statuses = symphony.get("category_status", {}) or {}
+    dimension = next(
+        (d for d in scorecard.get("dimensions", []) if d.get("name") == "Symphony Orchestration Readiness"),
+        {},
+    )
+    lines = [
+        "## Symphony Orchestration Readiness",
+        "",
+        f"Score: **{dimension.get('score', 'n/a')}/10** ({dimension.get('status', 'unknown')})",
+        "",
+        "This is a static readiness audit for OpenAI Symphony-style orchestration. It does not run a daemon, call live issue-tracker APIs, modify target repositories, or install the reference implementation.",
+        "",
+        "| Signal | Status | Evidence examples |",
+        "|---|---|---|",
+    ]
+    for key, label in [
+        ("workflow_contracts", "Workflow / agent contracts"),
+        ("task_state_surfaces", "Task-state surfaces"),
+        ("workspace_isolation", "Workspace isolation"),
+        ("agent_runner_guidance", "Agent runner guidance"),
+        ("observability", "Observability / proof"),
+        ("validation_guardrails", "Validation guardrails"),
+        ("recovery_guardrails", "Recovery guardrails"),
+    ]:
+        examples = categories.get(key, [])[:4]
+        evidence = ", ".join(f"`{item}`" for item in examples) if examples else "None detected"
+        lines.append(f"| {label} | {'present' if statuses.get(key) else 'missing'} | {evidence} |")
+    lines.extend(
+        [
+            "",
+            "Symphony adoption planning prompt:",
+            "",
+            "```text",
+            prompt_command("$ralplan", paths["symphony_adoption_prompt"]),
+            "```",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def render_main_report(
+    inventory: Dict[str, Any],
+    scorecard: Dict[str, Any],
+    paths: Dict[str, str],
+    upgrade_recommendations: Dict[str, Any] | None = None,
+) -> str:
     recs = scorecard.get("recommendations", {})
     docs = inventory.get("docs", {})
     codex = inventory.get("codex", {})
@@ -85,7 +641,7 @@ Repo: `{inventory.get('repo_root')}`
 
 Overall score: **{scorecard.get('overall_score')}/10** ({scorecard.get('overall_status')})
 
-This is an audit-first report. It does not mean the repo has been modified. Use the recommendations below as input to an approved OMX planning pass before making changes.
+This report has not modified the repo. Low-risk recommendations are auto-approved for the follow-up OMX execution pass; AGENTS.md items are P0 and should be handled first. Medium/high-risk recommendations remain gated on explicit approval.
 
 ## Score Summary
 
@@ -115,9 +671,17 @@ This is an audit-first report. It does not mean the repo has been modified. Use 
 - Generated/report artifact candidate dirs: {len(inventory.get('generated_artifacts', {}).get('candidate_dirs', []))}
 - Scaffold/legacy marker hits: {total_markers}
 
-## Low-Risk Fix Candidates
+{render_symphony_summary(inventory, scorecard, paths)}
+
+{render_upgrade_summary(upgrade_recommendations or default_upgrade_recommendations(), paths)}
+
+## Auto-Approved Low-Risk Fixes
 
 {rec_list(recs.get('low_risk', []))}
+
+## AGENTS.md Priority Lane
+
+Read `{paths['agents_priority']}` before planning or execution. Root `AGENTS.md` improvements are the first auto-approved lane when the audit identifies missing, stale, oversized, or under-informative instruction surfaces.
 
 ## Medium-Risk Recommendations
 
@@ -129,10 +693,17 @@ This is an audit-first report. It does not mean the repo has been modified. Use 
 
 ## Next OMX Step
 
-Use `omx-handoff.md` as the input to `$deep-interview`.
+Use the generated next-step artifacts instead of retyping long prompts.
+
+- OMX interactive default: select **Plan auto-approved fixes** when the skill presents the follow-up choice.
+- Minimal resume command: `$harness-engineering-audit continue`
+- Next-step index: `{paths['next_step_md']}`
+- Durable prompt files: `{paths['prompts_dir']}/`
+
+If you need a manual command:
 
 ```text
-$deep-interview "Read .codex/reports/harness-engineering-audit/omx-handoff.md and conduct a harness-engineering review. Ask only questions that affect architecture, validation truth, instruction surfaces, or execution risk."
+{prompt_command('$ralplan', paths['ralplan_prompt'])}
 ```
 """
 
@@ -154,9 +725,11 @@ def render_recommended_fixes(scorecard: Dict[str, Any]) -> str:
     recs = scorecard.get("recommendations", {})
     return f"""# Recommended Fixes
 
-This file separates recommendations by execution risk. Implement nothing until a plan is approved.
+This file separates recommendations by execution risk.
 
-## Low Risk / Planning Candidates
+Low-risk recommendations are auto-approved for the follow-up OMX execution pass. Medium and high-risk recommendations still require explicit approval.
+
+## Auto-Approved Low Risk
 
 {rec_list(recs.get('low_risk', []))}
 
@@ -170,83 +743,180 @@ This file separates recommendations by execution risk. Implement nothing until a
 
 ## Execution Rule
 
-Only low-risk, high-confidence items should proceed into an OMX PRD/test-spec by default. Medium and high-risk items require explicit human approval and validation design.
+Execute low-risk items by default after planning, with AGENTS.md P0 items first. Medium and high-risk items require explicit human approval and validation design.
 """
 
 
-def render_omx_handoff(inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
+def render_agents_priority(inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
+    instruction_files = inventory.get("instruction_files", [])
+    root_agents = [x for x in instruction_files if x.get("path") == "AGENTS.md"]
+    nested_agents = [x for x in instruction_files if x.get("path") != "AGENTS.md"]
+    root_summary = "No root AGENTS.md detected."
+    if root_agents:
+        root = root_agents[0]
+        root_summary = (
+            f"`AGENTS.md` exists ({root.get('bytes', 0)} bytes, {root.get('lines', 0)} lines). "
+            f"Commands: {bool(root.get('has_commands'))}. "
+            f"Docs pointers: {bool(root.get('mentions_docs'))}. "
+            f"Validation mentions: {bool(root.get('mentions_validation'))}."
+        )
+
+    recs = agents_priority_recommendations(scorecard)
+    return f"""# AGENTS.md Priority Lane
+
+AGENTS.md remediation is the first auto-approved harness-engineering lane.
+
+## Current AGENTS inventory
+
+- Root: {root_summary}
+- Nested/scoped AGENTS files: {len(nested_agents)}
+
+## Auto-approved P0 actions
+
+{rec_list(recs)}
+
+## Execution rules
+
+- Touch root `AGENTS.md` first when it is missing, oversized, stale, or missing docs/validation pointers.
+- Keep root `AGENTS.md` map-like: purpose, repo layout, authoritative docs, validation commands, constraints, and nested instruction scope rules.
+- Prefer moving detailed policy into docs rather than expanding root `AGENTS.md`.
+- Preserve deeper AGENTS scope semantics; do not delete nested instruction files without explicit approval.
+- Do not change security/sandbox settings, hooks, MCP, CI, package scripts, or source structure as part of the AGENTS.md lane unless separately approved.
+"""
+
+
+def render_omx_handoff(inventory: Dict[str, Any], scorecard: Dict[str, Any], paths: Dict[str, str]) -> str:
     return f"""# OMX Handoff: Harness Engineering Audit
 
 Audit report path:
 
 ```text
-.codex/reports/harness-engineering-audit/report.md
+{paths['report']}
 ```
 
 Inventory path:
 
 ```text
-.codex/reports/harness-engineering-audit/inventory.json
+{paths['inventory']}
 ```
 
 Scorecard path:
 
 ```text
-.codex/reports/harness-engineering-audit/scorecard.json
+{paths['scorecard']}
 ```
 
 ## Current verdict
 
 Overall score: **{scorecard.get('overall_score')}/10** ({scorecard.get('overall_status')})
 
-## Required read order for `$deep-interview`
+## Low-typing next step
 
-1. `.codex/reports/harness-engineering-audit/report.md`
-2. `.codex/reports/harness-engineering-audit/findings.md`
-3. `.codex/reports/harness-engineering-audit/recommended-fixes.md`
-4. `.codex/reports/harness-engineering-audit/inventory.json`
-5. `.codex/reports/harness-engineering-audit/scorecard.json`
-6. root `AGENTS.md` if present
-7. nested `AGENTS.md` / `AGENTS.override.md` files if present
-8. `.codex/config.toml` if present
-9. `.agents/skills/**` metadata if present
-10. `.omx/**` if present
-11. docs indexes / validation docs referenced in the report
+Default next stage: **Plan auto-approved fixes**.
 
-## Suggested `$deep-interview`
+- In interactive OMX, select the next stage instead of copying a long prompt.
+- If resuming later, type: `$harness-engineering-audit continue`
+- Low-risk fixes are auto-approved; AGENTS.md fixes are P0.
+- Next-step index: `{paths['next_step_md']}`
+- Machine-readable state: `{paths['next_step_json']}`
+- Prompt files: `{paths['prompts_dir']}/`
+
+## Required read order for planning/execution
+
+1. `{paths['report']}`
+2. `{paths['findings']}`
+3. `{paths['recommended_fixes']}`
+4. `{paths['agents_priority']}`
+5. `{paths['inventory']}`
+6. `{paths['scorecard']}`
+7. `{paths['upgrade_recommendations_md']}`
+8. `{paths['stack_inventory']}`
+9. `{paths['tool_inventory']}`
+10. `{paths['source_trust_policy']}`
+11. root `AGENTS.md` if present
+12. nested `AGENTS.md` / `AGENTS.override.md` files if present
+13. `.codex/config.toml` if present
+14. `.agents/skills/**` metadata if present
+15. `.omx/**` if present
+16. docs indexes / validation docs referenced in the report
+
+## Suggested `$ralplan` (default)
 
 ```text
-$deep-interview "Read .codex/reports/harness-engineering-audit/omx-handoff.md and the referenced report artifacts. Conduct a strict harness-engineering review. Clarify only questions that affect instruction surfaces, validation truth, Codex/OMX/MCP/skills/hooks safety, docs authority, generated artifact lifecycle, or execution risk. Do not implement changes during the interview."
+{prompt_command('$ralplan', paths['ralplan_prompt'])}
 ```
 
-## Suggested `$ralplan`
+## Suggested `$ralplan` for Symphony adoption
 
 ```text
-$ralplan "Read the harness-engineering audit report and interview output. Produce .omx/plans/prd-harness-engineering-audit.md and .omx/plans/test-spec-harness-engineering-audit.md. Planning must distinguish low-risk immediate fixes, medium-risk review items, and high-risk deferred work. The plan must include validation commands and rollback strategy."
+{prompt_command('$ralplan', paths['symphony_adoption_prompt'])}
+```
+
+## Suggested `$ralplan` for approval-gated tool upgrades
+
+```text
+{prompt_command('$ralplan', paths['tool_upgrade_prompt'])}
 ```
 
 ## Suggested `$team`
 
 ```text
-$team "Execute only approved low-risk fixes from the harness-engineering plan. Keep root AGENTS concise and map-like. Preserve repo-specific docs. Update validation evidence. Do not modify risky config, hooks, MCP, CI, or source structure without explicit approval."
+{prompt_command('$team', paths['team_prompt'])}
 ```
 
 ## Suggested `$ralph`
 
 ```text
-$ralph "Verify the harness-engineering cleanup. Confirm validation, report what changed, document remaining risk, and provide a stop/no-stop recommendation."
+{prompt_command('$ralph', paths['ralph_prompt'])}
+```
+
+## Suggested `$deep-interview` for medium/high-risk questions
+
+```text
+{prompt_command('$deep-interview', paths['deep_interview_prompt'])}
 ```
 """
 
 
-def write_reports(inventory: Dict[str, Any], scorecard: Dict[str, Any], out_dir: Path, force: bool = False) -> None:
+def write_reports(
+    inventory: Dict[str, Any],
+    scorecard: Dict[str, Any],
+    out_dir: Path,
+    force: bool = False,
+    stack_inventory: Dict[str, Any] | None = None,
+    tool_inventory: Dict[str, Any] | None = None,
+    upgrade_recommendations: Dict[str, Any] | None = None,
+) -> None:
     safe_prepare_output_dir(out_dir, force=force)
+    paths = build_path_context(inventory, out_dir)
+    stack_inventory = stack_inventory or {"schema": "harness.stack-inventory.v1", "stack_tags": [], "profile_groups": {}}
+    tool_inventory = tool_inventory or {
+        "schema": "harness.tool-inventory.v1",
+        "native_capabilities": [],
+        "installed_tools": [],
+        "capability_gaps": [],
+    }
+    upgrade_recommendations = upgrade_recommendations or default_upgrade_recommendations()
     (out_dir / "inventory.json").write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (out_dir / "scorecard.json").write_text(json.dumps(scorecard, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    (out_dir / "report.md").write_text(render_main_report(inventory, scorecard), encoding="utf-8")
+    (out_dir / "stack-inventory.json").write_text(json.dumps(stack_inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out_dir / "tool-inventory.json").write_text(json.dumps(tool_inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out_dir / "upgrade-recommendations.json").write_text(json.dumps(upgrade_recommendations, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out_dir / "web-verification-queue.json").write_text(
+        json.dumps(upgrade_recommendations.get("web_verification_queue", {}), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (out_dir / "source-trust-policy.md").write_text(render_source_trust_policy(upgrade_recommendations), encoding="utf-8")
+    (out_dir / "upgrade-recommendations.md").write_text(
+        render_upgrade_recommendations_markdown(upgrade_recommendations, paths),
+        encoding="utf-8",
+    )
+    (out_dir / "report.md").write_text(render_main_report(inventory, scorecard, paths, upgrade_recommendations), encoding="utf-8")
     (out_dir / "findings.md").write_text(render_findings(scorecard), encoding="utf-8")
     (out_dir / "recommended-fixes.md").write_text(render_recommended_fixes(scorecard), encoding="utf-8")
-    (out_dir / "omx-handoff.md").write_text(render_omx_handoff(inventory, scorecard), encoding="utf-8")
+    (out_dir / "agents-priority.md").write_text(render_agents_priority(inventory, scorecard), encoding="utf-8")
+    (out_dir / "omx-handoff.md").write_text(render_omx_handoff(inventory, scorecard, paths), encoding="utf-8")
+    write_next_step_artifacts(paths, out_dir)
 
 
 def main() -> None:

@@ -1,0 +1,263 @@
+{
+  "entries": [
+    {
+      "capabilities": [
+        "agent instructions",
+        "repo guidance"
+      ],
+      "config_commands": [
+        "Edit AGENTS.md after approval; keep it concise and map-like."
+      ],
+      "id": "codex-agents-md",
+      "install_commands": [],
+      "last_reviewed": "2026-05-02",
+      "license_hint": null,
+      "name": "AGENTS.md guidance",
+      "rollback_commands": [
+        "git checkout -- AGENTS.md"
+      ],
+      "source_owner": "OpenAI",
+      "source_url": "https://developers.openai.com/codex/guides/agents-md",
+      "stack_tags": [
+        "codex-ready",
+        "docs-heavy"
+      ],
+      "trust_tier": "tier0-official",
+      "validation_commands": [
+        "Review generated harness audit report and run documented repo validation."
+      ]
+    },
+    {
+      "capabilities": [
+        "external context",
+        "tool integration"
+      ],
+      "config_commands": [
+        "Add scoped MCP config only after purpose, owner, auth, and rollback are approved."
+      ],
+      "id": "codex-mcp",
+      "install_commands": [],
+      "last_reviewed": "2026-05-02",
+      "license_hint": null,
+      "name": "Codex MCP integration",
+      "rollback_commands": [
+        "Remove the approved MCP entry from .codex/config.toml"
+      ],
+      "source_owner": "OpenAI",
+      "source_url": "https://developers.openai.com/codex/mcp",
+      "stack_tags": [
+        "codex-ready",
+        "mcp-server-or-client"
+      ],
+      "trust_tier": "tier0-official",
+      "validation_commands": [
+        "codex mcp list || true"
+      ]
+    },
+    {
+      "capabilities": [
+        "planning",
+        "team orchestration",
+        "verification",
+        "trace",
+        "memory"
+      ],
+      "config_commands": [
+        "Prefer existing OMX workflows before adding external orchestration tooling."
+      ],
+      "id": "omx-native-workflows",
+      "install_commands": [],
+      "last_reviewed": "2026-05-02",
+      "license_hint": null,
+      "name": "OMX native workflows",
+      "rollback_commands": [
+        "No repo mutation required for recommendation-only use."
+      ],
+      "source_owner": "oh-my-codex",
+      "source_url": "https://github.com/ryne2010/oh-my-codex",
+      "stack_tags": [
+        "omx-enabled"
+      ],
+      "trust_tier": "tier1-high-trust",
+      "validation_commands": [
+        "omx status || true"
+      ]
+    },
+    {
+      "capabilities": [
+        "python tests",
+        "test discovery"
+      ],
+      "config_commands": [
+        "Add pytest configuration only after approval."
+      ],
+      "id": "pytest",
+      "install_commands": [
+        "python -m pip install pytest"
+      ],
+      "last_reviewed": "2026-05-02",
+      "license_hint": "MIT",
+      "name": "pytest",
+      "rollback_commands": [
+        "python -m pip uninstall pytest"
+      ],
+      "source_owner": "pytest-dev",
+      "source_url": "https://docs.pytest.org/",
+      "stack_tags": [
+        "python"
+      ],
+      "trust_tier": "tier1-high-trust",
+      "validation_commands": [
+        "python -m pytest"
+      ]
+    },
+    {
+      "capabilities": [
+        "browser e2e",
+        "frontend runtime validation"
+      ],
+      "config_commands": [
+        "Add Playwright config and tests only after approval."
+      ],
+      "id": "playwright",
+      "install_commands": [
+        "npm init playwright@latest"
+      ],
+      "last_reviewed": "2026-05-02",
+      "license_hint": "Apache-2.0",
+      "name": "Playwright",
+      "rollback_commands": [
+        "Remove Playwright config/tests and package entries from the approved diff."
+      ],
+      "source_owner": "Microsoft Playwright",
+      "source_url": "https://playwright.dev/",
+      "stack_tags": [
+        "frontend-web",
+        "react-app",
+        "nextjs-app",
+        "vue-app",
+        "svelte-app",
+        "angular-app"
+      ],
+      "trust_tier": "tier1-high-trust",
+      "validation_commands": [
+        "npx playwright test"
+      ]
+    },
+    {
+      "capabilities": [
+        "ui component workflow",
+        "design-system scaffolding"
+      ],
+      "config_commands": [
+        "Run shadcn init/add only after approval because it mutates source/config."
+      ],
+      "id": "shadcn-ui",
+      "install_commands": [
+        "npx shadcn@latest init"
+      ],
+      "last_reviewed": "2026-05-02",
+      "license_hint": "MIT",
+      "name": "shadcn/ui",
+      "rollback_commands": [
+        "Revert generated components/config from the approved diff."
+      ],
+      "source_owner": "shadcn",
+      "source_url": "https://ui.shadcn.com/",
+      "stack_tags": [
+        "shadcn-ui",
+        "tailwind",
+        "react-app",
+        "nextjs-app"
+      ],
+      "trust_tier": "tier1-high-trust",
+      "validation_commands": [
+        "npm run lint",
+        "npm test"
+      ]
+    },
+    {
+      "capabilities": [
+        "design-source integration",
+        "design context"
+      ],
+      "config_commands": [
+        "Add Figma integration only after token scope and MCP trust review."
+      ],
+      "id": "figma-mcp",
+      "install_commands": [],
+      "last_reviewed": "2026-05-02",
+      "license_hint": null,
+      "name": "Figma MCP/server integration",
+      "rollback_commands": [
+        "Remove Figma MCP config and revoke related tokens."
+      ],
+      "source_owner": "Figma",
+      "source_url": "https://help.figma.com/",
+      "stack_tags": [
+        "figma-driven",
+        "design-system"
+      ],
+      "trust_tier": "tier0-official",
+      "validation_commands": [
+        "Confirm Figma MCP/tool access with least-privilege credentials."
+      ]
+    },
+    {
+      "capabilities": [
+        "api client/server generation",
+        "contract workflow"
+      ],
+      "config_commands": [
+        "Add generation config only after approving generated artifact lifecycle."
+      ],
+      "id": "openapi-generator",
+      "install_commands": [
+        "Use an approved package-manager or container invocation for openapi-generator."
+      ],
+      "last_reviewed": "2026-05-02",
+      "license_hint": "Apache-2.0",
+      "name": "OpenAPI Generator",
+      "rollback_commands": [
+        "Remove generated files/config from the approved diff."
+      ],
+      "source_owner": "OpenAPI Generator",
+      "source_url": "https://openapi-generator.tech/",
+      "stack_tags": [
+        "openapi"
+      ],
+      "trust_tier": "tier1-high-trust",
+      "validation_commands": [
+        "Run existing API/client tests after generation."
+      ]
+    },
+    {
+      "capabilities": [
+        "container validation",
+        "runtime parity"
+      ],
+      "config_commands": [
+        "Add/modify Docker files only after runtime ownership approval."
+      ],
+      "id": "docker-official",
+      "install_commands": [],
+      "last_reviewed": "2026-05-02",
+      "license_hint": null,
+      "name": "Docker official tooling",
+      "rollback_commands": [
+        "Revert Dockerfile/compose changes from the approved diff."
+      ],
+      "source_owner": "Docker",
+      "source_url": "https://docs.docker.com/",
+      "stack_tags": [
+        "docker"
+      ],
+      "trust_tier": "tier0-official",
+      "validation_commands": [
+        "docker build ."
+      ]
+    }
+  ],
+  "schema": "harness.tool-catalog.v1",
+  "source": "static-seed-catalog"
+}

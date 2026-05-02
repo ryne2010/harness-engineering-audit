@@ -1,6 +1,6 @@
 # Harness Engineering Audit Rubric
 
-This rubric scores a repo across 13 dimensions. Scores are intentionally strict and evidence-based.
+This rubric scores a repo across 14 dimensions. Scores are intentionally strict and evidence-based.
 
 Scale:
 
@@ -159,3 +159,25 @@ Signals:
 - low instruction entropy
 - clear production vs harness boundaries
 - stop/no-stop criteria
+
+## 14. Symphony Orchestration Readiness
+
+Can the repository support a future OpenAI Symphony-style issue-tracker control plane without first requiring a human to rediscover workflow, workspace, validation, observability, and recovery contracts?
+
+Signals:
+
+- repo-owned workflow / agent contracts
+- task-state or control-plane handoff surfaces
+- workspace isolation guidance
+- agent runner / CLI guidance
+- observability and proof-of-work reporting
+- validation / CI guardrails
+- recovery, resume, rollback, or reconciliation guidance
+
+Non-goals for the audit dimension:
+
+- no daemon/service execution
+- no live tracker API calls
+- no target-repo auto-modification
+- no reference implementation setup
+
