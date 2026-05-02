@@ -23,4 +23,5 @@ gh skill publish --tag vX.Y.Z
 ```
 
 5. Test install in a clean repo.
-6. Confirm generated report artifacts are created.
+6. Confirm generated report artifacts are created, including `update-status.json`.
+7. Test the documented one-skill update command; do not use `gh skill update --all` for release validation.

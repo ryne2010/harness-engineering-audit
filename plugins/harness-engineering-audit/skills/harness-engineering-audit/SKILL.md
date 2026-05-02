@@ -2,6 +2,7 @@
 name: harness-engineering-audit
 description: Audit a repository for OpenAI-style harness engineering and Codex/OMX readiness. Use when reviewing AGENTS.md, Codex config, OMX workflows, MCP, hooks, rules, skills, subagents, docs authority, validation commands, repo legibility, generated artifact policy, or production readiness for AI-driven development.
 license: MIT
+version: 0.2.0
 ---
 
 # Harness Engineering Audit
@@ -106,6 +107,7 @@ The script writes:
   upgrade-recommendations.md
   web-verification-queue.json
   source-trust-policy.md
+  update-status.json
   report.md
   findings.md
   recommended-fixes.md
@@ -137,6 +139,29 @@ Use a custom output directory only when needed:
 ```bash
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --out /tmp/harness-engineering-audit
 ```
+
+
+## Skill update behavior
+
+Normal audit runs check this skill's update status by default and write `update-status.json` plus a `Skill update status` section in `report.md`. This check is report-only and never updates skill files. Disable it with:
+
+```bash
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --no-check-update
+```
+
+Self-update is explicit and approval-gated. To update this one user-scoped skill installation, run:
+
+```bash
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --self-update --update-scope user
+```
+
+The self-update path runs only this command and exits immediately after success:
+
+```bash
+gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope user --force
+```
+
+Project-scoped installs should generally be updated intentionally through the repository and reviewed in a PR. Avoid `gh skill update --all` for this flow because system or manually installed skills may lack GitHub metadata and because this skill should update only itself.
 
 ## Score dimensions
 

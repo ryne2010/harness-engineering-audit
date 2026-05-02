@@ -65,6 +65,25 @@ Or install from a local clone:
 gh skill install ./skills/harness-engineering-audit --agent codex --scope project
 ```
 
+
+## Safe skill updates
+
+Audit runs check the skill's update status by default and include the result in `.codex/reports/harness-engineering-audit/update-status.json` plus the main report. This is report-only: the skill does **not** auto-update by default.
+
+To update this one skill globally for your user, prefer the explicit install command:
+
+```bash
+gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope user --force
+```
+
+Or use the skill's explicit self-update flag:
+
+```bash
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --self-update --update-scope user
+```
+
+After a successful self-update, restart Codex / rerun the audit so the updated files are loaded. Project-scoped installs should generally be updated intentionally through a repo change and PR. Avoid `gh skill update --all` for this use case because it may touch unrelated system/manual skills and may fail on skills without GitHub metadata.
+
 ## Run the audit
 
 From a target repo root after installing the skill:
@@ -85,6 +104,7 @@ The audit replaces the previous generated report set at:
   upgrade-recommendations.md
   web-verification-queue.json
   source-trust-policy.md
+  update-status.json
   report.md
   findings.md
   recommended-fixes.md

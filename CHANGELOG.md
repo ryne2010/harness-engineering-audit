@@ -1,5 +1,12 @@
 # Changelog
 
+
+## Unreleased
+
+- Adds report-only skill update checks and `update-status.json`.
+- Adds explicit `--self-update` / `--update-scope` support that updates only `harness-engineering-audit` and exits with restart guidance.
+- Documents safe one-skill update behavior and warns against `gh skill update --all` for this flow.
+
 ## v0.2.0
 
 - Adds stack detection, installed tooling inventory, and approval-gated upgrade recommendations.

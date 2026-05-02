@@ -103,3 +103,22 @@ This skill follows the principle that agent-ready repositories need:
 - explicit scaffolding/legacy cleanup policy
 
 OpenAI/Codex guidance is the normative source. Cross-agent resources are included only as comparison material.
+
+
+## Safe updates
+
+Normal audit runs check for skill updates by default and write update status into the generated report directory. The check is non-mutating.
+
+Explicit self-update is available only through:
+
+```bash
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --self-update --update-scope user
+```
+
+To force-update this one user-scoped skill directly:
+
+```bash
+gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope user --force
+```
+
+Avoid `gh skill update --all`; project-scoped installs should generally be updated intentionally through a repository PR.

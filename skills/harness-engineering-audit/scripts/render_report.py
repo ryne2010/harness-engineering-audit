@@ -100,6 +100,7 @@ def build_path_context(inventory: Dict[str, Any], out_dir: Path) -> Dict[str, st
         "upgrade_recommendations_md": report_file("upgrade-recommendations.md"),
         "web_verification_queue": report_file("web-verification-queue.json"),
         "source_trust_policy": report_file("source-trust-policy.md"),
+        "update_status": report_file("update-status.json"),
     }
 
 
@@ -574,6 +575,67 @@ def render_source_trust_policy(upgrade_recommendations: Dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+
+def default_update_status() -> Dict[str, Any]:
+    return {
+        "schema": "harness-engineering-audit.update-status.v1",
+        "status": "unknown",
+        "installed_version": None,
+        "latest_version": None,
+        "action_taken": "none",
+        "human_approval_required": True,
+        "recommended_update_command": "gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope user --force",
+        "recommended_project_update_command": "gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope project --force",
+        "recommended_update_command_multiline": "gh skill install ryne2010/harness-engineering-audit \\\n  skills/harness-engineering-audit \\\n  --agent codex \\\n  --scope user \\\n  --force",
+        "recommended_project_update_command_multiline": "gh skill install ryne2010/harness-engineering-audit \\\n  skills/harness-engineering-audit \\\n  --agent codex \\\n  --scope project \\\n  --force",
+        "warnings": [
+            "Normal audit runs never self-update silently.",
+            "Avoid `gh skill update --all` for this skill because system/manual skills may lack GitHub metadata.",
+            "Project-scoped installs should generally be updated intentionally through a repository PR.",
+        ],
+    }
+
+
+def render_update_status(update_status: Dict[str, Any]) -> str:
+    status = update_status or default_update_status()
+    user_cmd = status.get("recommended_update_command_multiline") or "gh skill install ryne2010/harness-engineering-audit \\\n  skills/harness-engineering-audit \\\n  --agent codex \\\n  --scope user \\\n  --force"
+    project_cmd = status.get("recommended_project_update_command_multiline") or "gh skill install ryne2010/harness-engineering-audit \\\n  skills/harness-engineering-audit \\\n  --agent codex \\\n  --scope project \\\n  --force"
+    warnings = status.get("warnings", []) or []
+    errors = status.get("errors", []) or []
+    messages = status.get("messages", []) or []
+    extra_lines = []
+    if messages:
+        extra_lines.extend(["", "Messages:", *[f"- {m}" for m in messages]])
+    if warnings:
+        extra_lines.extend(["", "Safety notes:", *[f"- {w}" for w in warnings]])
+    if errors:
+        extra_lines.extend(["", "Check errors / limitations:", *[f"- {e}" for e in errors]])
+    extra = "\n".join(extra_lines)
+    return f"""## Skill update status
+
+- Installed version: `{status.get('installed_version') or 'unknown'}`
+- Latest version: `{status.get('latest_version') or 'unknown'}`
+- Status: `{status.get('status', 'unknown')}`
+- Action taken: `{status.get('action_taken', 'none')}`
+- Human approval required: `{'yes' if status.get('human_approval_required', True) else 'no'}`
+- Machine-readable artifact: `update-status.json`
+
+Recommended user-scope update command:
+
+```bash
+{user_cmd}
+```
+
+Recommended project-scope update command (use intentionally, usually through a repo PR):
+
+```bash
+{project_cmd}
+```
+
+Do not use `gh skill update --all` for this flow; it may touch unrelated/system/manual skills and can fail on skills without GitHub metadata. Normal audit runs do not self-update. Use `--self-update --update-scope user` only when you explicitly want this skill installation updated.
+{extra}
+"""
+
 def render_symphony_summary(inventory: Dict[str, Any], scorecard: Dict[str, Any], paths: Dict[str, str]) -> str:
     symphony = inventory.get("symphony_readiness", {}) or {}
     categories = symphony.get("categories", {}) or {}
@@ -622,6 +684,7 @@ def render_main_report(
     scorecard: Dict[str, Any],
     paths: Dict[str, str],
     upgrade_recommendations: Dict[str, Any] | None = None,
+    update_status: Dict[str, Any] | None = None,
 ) -> str:
     recs = scorecard.get("recommendations", {})
     docs = inventory.get("docs", {})
@@ -675,6 +738,7 @@ This report has not modified the repo. Low-risk recommendations are auto-approve
 
 {render_upgrade_summary(upgrade_recommendations or default_upgrade_recommendations(), paths)}
 
+{render_update_status(update_status or default_update_status())}
 ## Auto-Approved Low-Risk Fixes
 
 {rec_list(recs.get('low_risk', []))}
@@ -886,6 +950,7 @@ def write_reports(
     stack_inventory: Dict[str, Any] | None = None,
     tool_inventory: Dict[str, Any] | None = None,
     upgrade_recommendations: Dict[str, Any] | None = None,
+    update_status: Dict[str, Any] | None = None,
 ) -> None:
     safe_prepare_output_dir(out_dir, force=force)
     paths = build_path_context(inventory, out_dir)
@@ -897,11 +962,13 @@ def write_reports(
         "capability_gaps": [],
     }
     upgrade_recommendations = upgrade_recommendations or default_upgrade_recommendations()
+    update_status = update_status or default_update_status()
     (out_dir / "inventory.json").write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (out_dir / "scorecard.json").write_text(json.dumps(scorecard, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (out_dir / "stack-inventory.json").write_text(json.dumps(stack_inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (out_dir / "tool-inventory.json").write_text(json.dumps(tool_inventory, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (out_dir / "upgrade-recommendations.json").write_text(json.dumps(upgrade_recommendations, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out_dir / "update-status.json").write_text(json.dumps(update_status, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (out_dir / "web-verification-queue.json").write_text(
         json.dumps(upgrade_recommendations.get("web_verification_queue", {}), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
@@ -911,7 +978,7 @@ def write_reports(
         render_upgrade_recommendations_markdown(upgrade_recommendations, paths),
         encoding="utf-8",
     )
-    (out_dir / "report.md").write_text(render_main_report(inventory, scorecard, paths, upgrade_recommendations), encoding="utf-8")
+    (out_dir / "report.md").write_text(render_main_report(inventory, scorecard, paths, upgrade_recommendations, update_status), encoding="utf-8")
     (out_dir / "findings.md").write_text(render_findings(scorecard), encoding="utf-8")
     (out_dir / "recommended-fixes.md").write_text(render_recommended_fixes(scorecard), encoding="utf-8")
     (out_dir / "agents-priority.md").write_text(render_agents_priority(inventory, scorecard), encoding="utf-8")

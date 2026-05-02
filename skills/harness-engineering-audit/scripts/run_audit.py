@@ -7,6 +7,7 @@ from pathlib import Path
 
 from harness_inventory import collect_inventory
 from harness_score import score_inventory
+from check_update import check_update, self_update
 from recommend_tools import generate_recommendations
 from render_report import write_reports
 from stack_detect import detect_stack
@@ -20,10 +21,55 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Allow overwrite of custom output directory")
     parser.add_argument("--no-recommend-tools", action="store_true", help="Disable upgrade recommendation generation")
     parser.add_argument("--no-web", action="store_true", help="Do not request follow-up web verification queue entries")
+    parser.add_argument("--check-update", dest="check_update", action="store_true", default=True, help="Check this skill for updates and include status in reports (default)")
+    parser.add_argument("--no-check-update", dest="check_update", action="store_false", help="Disable non-mutating skill update check")
+    parser.add_argument("--self-update", action="store_true", help="Explicitly update this skill installation and exit")
+    parser.add_argument("--update-scope", choices=["user", "project", "auto"], default="auto", help="Install scope for --self-update")
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
     out = Path(args.out).resolve() if args.out else repo / ".codex" / "reports" / "harness-engineering-audit"
+
+    if args.self_update:
+        update_status = self_update(repo, args.update_scope)
+        for message in update_status.get("messages", []):
+            print(message)
+        for error in update_status.get("errors", []):
+            print(f"Self-update error: {error}")
+        if update_status.get("action_taken") == "self-update":
+            if not update_status.get("messages"):
+                print("Skill updated. Restart Codex / rerun the audit to use the updated files.")
+            return
+        raise SystemExit(1)
+
+    if args.check_update:
+        try:
+            update_status = check_update(repo)
+        except Exception as exc:  # normal audits must not fail because update awareness is unavailable
+            update_status = {
+                "schema": "harness-engineering-audit.update-status.v1",
+                "status": "error",
+                "installed_version": None,
+                "latest_version": None,
+                "action_taken": "none",
+                "human_approval_required": True,
+                "recommended_update_command": "gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope user --force",
+                "recommended_project_update_command": "gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope project --force",
+                "errors": [str(exc)],
+            }
+    else:
+        update_status = {
+            "schema": "harness-engineering-audit.update-status.v1",
+            "status": "unknown",
+            "installed_version": None,
+            "latest_version": None,
+            "action_taken": "none",
+            "human_approval_required": True,
+            "check_enabled": False,
+            "messages": ["Update check disabled by --no-check-update."],
+            "recommended_update_command": "gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope user --force",
+            "recommended_project_update_command": "gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-audit --agent codex --scope project --force",
+        }
 
     inventory = collect_inventory(repo)
     stack_inventory = detect_stack(repo, inventory)
@@ -43,6 +89,7 @@ def main() -> None:
         stack_inventory=stack_inventory,
         tool_inventory=tool_inventory,
         upgrade_recommendations=upgrade_recommendations,
+        update_status=update_status,
     )
 
     print(f"Harness-engineering audit complete.")
@@ -50,6 +97,7 @@ def main() -> None:
     print(f"Report: {out / 'report.md'}")
     print(f"Next step: {out / 'next-step.md'}")
     print(f"Upgrade recommendations: {out / 'upgrade-recommendations.md'}")
+    print(f"Skill update status: {out / 'update-status.json'}")
     print(f"Web verification queue: {out / 'web-verification-queue.json'}")
     print(f"AGENTS priority: {out / 'agents-priority.md'}")
     print("Default OMX next stage: plan auto-approved fixes (AGENTS.md first)")

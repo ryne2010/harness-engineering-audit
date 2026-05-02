@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -11,11 +12,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_AUDIT = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts" / "run_audit.py"
+CHECK_UPDATE = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts" / "check_update.py"
 
 
 def main() -> int:
     if not RUN_AUDIT.exists():
         print(f"missing run_audit.py at {RUN_AUDIT}", file=sys.stderr)
+        return 1
+    if not CHECK_UPDATE.exists():
+        print(f"missing check_update.py at {CHECK_UPDATE}", file=sys.stderr)
         return 1
 
     with tempfile.TemporaryDirectory(prefix="harness-audit-smoke-") as td:
@@ -56,6 +61,80 @@ def main() -> int:
         (repo / "openapi.yaml").write_text("openapi: 3.1.0\ninfo:\n  title: Smoke\n  version: 0.0.0\npaths: {}\n", encoding="utf-8")
         (repo / "Dockerfile").write_text("FROM node:22-alpine\n", encoding="utf-8")
 
+
+        fake_bin = Path(td) / "bin"
+        fake_bin.mkdir()
+        fake_log = Path(td) / "fake-gh-log.jsonl"
+        fake_gh = fake_bin / "gh"
+        fake_gh.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, sys\n"
+            "log = os.environ.get('FAKE_GH_LOG')\n"
+            "if log:\n"
+            "    with open(log, 'a', encoding='utf-8') as fh:\n"
+            "        fh.write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd()}) + '\\n')\n"
+            "args = sys.argv[1:]\n"
+            "if args[:2] == ['skill', '--help']:\n"
+            "    print('gh skill help')\n"
+            "    raise SystemExit(0)\n"
+            "if args[:2] == ['release', 'view']:\n"
+            "    print(json.dumps({'tagName': 'v0.2.0'}))\n"
+            "    raise SystemExit(0)\n"
+            "if args[:2] == ['skill', 'install']:\n"
+            "    print('installed')\n"
+            "    raise SystemExit(0)\n"
+            "raise SystemExit(2)\n",
+            encoding="utf-8",
+        )
+        fake_gh.chmod(0o755)
+        fake_env = dict(os.environ)
+        fake_env["PATH"] = f"{fake_bin}{os.pathsep}{fake_env.get('PATH', '')}"
+        fake_env["FAKE_GH_LOG"] = str(fake_log)
+        self_update = subprocess.run(
+            [sys.executable, "-S", str(CHECK_UPDATE), str(repo), "--self-update", "--update-scope", "project", "--json"],
+            cwd=str(REPO_ROOT.parent),
+            env=fake_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if self_update.returncode != 0:
+            print(self_update.stdout)
+            print(self_update.stderr, file=sys.stderr)
+            return self_update.returncode
+        self_update_payload = json.loads(self_update.stdout)
+        if self_update_payload.get("action_taken") != "self-update" or self_update_payload.get("effective_update_scope") != "project":
+            print(f"fake self-update did not report success: {self_update_payload}", file=sys.stderr)
+            return 1
+        fake_calls = [json.loads(line) for line in fake_log.read_text(encoding="utf-8").splitlines()]
+        install_calls = [call for call in fake_calls if call.get("argv", [])[:2] == ["skill", "install"]]
+        if len(install_calls) != 1:
+            print(f"expected exactly one skill install call, saw: {fake_calls}", file=sys.stderr)
+            return 1
+        install_call = install_calls[0]
+        if install_call.get("cwd") != str(repo.resolve()):
+            print(f"project self-update cwd should be target repo, saw: {install_call}", file=sys.stderr)
+            return 1
+        if "--all" in install_call.get("argv", []):
+            print(f"self-update must not use --all: {install_call}", file=sys.stderr)
+            return 1
+
+        check_result = subprocess.run(
+            [sys.executable, "-S", str(CHECK_UPDATE), str(repo), "--json"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if check_result.returncode != 0:
+            print(check_result.stdout)
+            print(check_result.stderr, file=sys.stderr)
+            return check_result.returncode
+        check_payload = json.loads(check_result.stdout)
+        if check_payload.get("action_taken") != "none" or check_payload.get("status") not in {"current", "available", "unknown", "tooling_missing", "error"}:
+            print(f"unexpected check_update payload: {check_payload}", file=sys.stderr)
+            return 1
+
         result = subprocess.run(
             [sys.executable, "-S", str(RUN_AUDIT), str(repo)],
             cwd=str(REPO_ROOT),
@@ -85,6 +164,7 @@ def main() -> int:
             "upgrade-recommendations.md",
             "web-verification-queue.json",
             "source-trust-policy.md",
+            "update-status.json",
             "prompts/deep-interview.md",
             "prompts/ralplan.md",
             "prompts/team.md",
@@ -112,6 +192,32 @@ def main() -> int:
         report_text = (out / "report.md").read_text(encoding="utf-8")
         if "Symphony Orchestration Readiness" not in report_text:
             print("report missing Symphony readiness section", file=sys.stderr)
+            return 1
+        if "## Skill update status" not in report_text or "gh skill update --all" not in report_text:
+            print("report missing skill update status safety section", file=sys.stderr)
+            return 1
+        update_status = json.loads((out / "update-status.json").read_text(encoding="utf-8"))
+        if update_status.get("action_taken") != "none":
+            print("normal audit must not trigger self-update", file=sys.stderr)
+            return 1
+        if update_status.get("status") not in {"current", "available", "unknown", "tooling_missing", "error"}:
+            print(f"unexpected update status: {update_status}", file=sys.stderr)
+            return 1
+
+        no_check = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(repo), "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if no_check.returncode != 0:
+            print(no_check.stdout)
+            print(no_check.stderr, file=sys.stderr)
+            return no_check.returncode
+        no_check_status = json.loads((out / "update-status.json").read_text(encoding="utf-8"))
+        if no_check_status.get("check_enabled") is not False or no_check_status.get("action_taken") != "none":
+            print(f"--no-check-update did not produce expected status: {no_check_status}", file=sys.stderr)
             return 1
 
         next_step = json.loads((out / "next-step.json").read_text(encoding="utf-8"))
