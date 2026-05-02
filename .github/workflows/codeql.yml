@@ -1,7 +1,9 @@
 name: CodeQL
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Validate"]
+    types: [completed]
     branches: ["main"]
   pull_request:
     branches: ["main"]
@@ -15,9 +17,21 @@ permissions:
 jobs:
   analyze:
     name: CodeQL
+    if: >-
+      ${{ github.event_name != 'workflow_run' ||
+          github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout workflow-run commit
+        if: github.event_name == 'workflow_run'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Checkout repository
+        if: github.event_name != 'workflow_run'
+        uses: actions/checkout@v4
+
       - uses: github/codeql-action/init@v4
         with:
           languages: python

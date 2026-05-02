@@ -1,20 +1,10 @@
 name: Release Skill
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "skills/**"
-      - "plugins/**"
-      - ".agents/plugins/**"
-      - "docs/**"
-      - "README.md"
-      - "LICENSE"
-      - "CHANGELOG.md"
-      - "pyproject.toml"
-      - ".github/workflows/release-skill.yml"
-      - "tests/**"
+  workflow_run:
+    workflows: ["CodeQL"]
+    types: [completed]
+    branches: ["main"]
 
 permissions:
   contents: write
@@ -28,20 +18,48 @@ concurrency:
 jobs:
   release:
     name: Validate and publish skill release
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'workflow_run' }}
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout workflow-run commit
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
+      - name: Check release-relevant changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          head_sha="${{ github.event.workflow_run.head_sha }}"
+
+          if git rev-parse "${head_sha}^" >/dev/null 2>&1; then
+            changed_files="$(git diff --name-only "${head_sha}^" "${head_sha}")"
+          else
+            changed_files="$(git ls-tree -r --name-only "${head_sha}")"
+          fi
+
+          printf 'Changed files considered for release:\n%s\n' "${changed_files}"
+
+          if printf '%s\n' "${changed_files}" | grep -Eq '^(skills/|plugins/|\.agents/plugins/|docs/|README\.md$|LICENSE$|CHANGELOG\.md$|pyproject\.toml$|tests/|\.github/workflows/release-skill\.yml$|\.github/workflows/codeql\.yml$|\.github/workflows/validate\.yml$)'; then
+            echo "release_relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No release-relevant changes detected; skipping publish."
+            echo "release_relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Ensure GitHub CLI has gh skill support
+        if: steps.changes.outputs.release_relevant == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -83,21 +101,25 @@ jobs:
           gh skill --help
 
       - name: Validate Python scripts
+        if: steps.changes.outputs.release_relevant == 'true'
         run: |
           python3 -m py_compile skills/harness-engineering-audit/scripts/*.py
           python3 -m py_compile tests/smoke/run_skill_smoke.py
 
       - name: Run smoke test
+        if: steps.changes.outputs.release_relevant == 'true'
         run: |
           python3 tests/smoke/run_skill_smoke.py
 
       - name: Validate skill package
+        if: steps.changes.outputs.release_relevant == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh skill publish --dry-run
 
       - name: Compute next release tag
+        if: steps.changes.outputs.release_relevant == 'true'
         id: version
         shell: bash
         run: |
@@ -123,6 +145,7 @@ jobs:
           echo "Next release tag: $next"
 
       - name: Publish skill release
+        if: steps.changes.outputs.release_relevant == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
