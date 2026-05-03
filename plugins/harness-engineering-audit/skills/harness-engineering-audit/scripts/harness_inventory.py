@@ -15,13 +15,17 @@ IGNORE_DIRS = {
     ".git", "node_modules", ".venv", "venv", "env", "__pycache__",
     "dist", "build", ".next", ".nuxt", "coverage", ".pytest_cache",
     ".mypy_cache", ".ruff_cache", ".turbo", ".cache", "target",
-    "Library", "Temp", "Logs", "DerivedData", ".idea", ".vscode"
+    "Library", "Temp", "Logs", "DerivedData", ".idea", ".vscode",
+    ".history",
 }
 
 AUDIT_SIGNAL_EXCLUDED_PREFIXES = {
     (".codex", "reports"),
     (".omx", "cache"),
+    (".omx", "context"),
+    (".omx", "interviews"),
     (".omx", "state"),
+    (".omx", "plans"),
     (".omx", "logs"),
     (".agents", "skills", "harness-engineering-audit"),
     (".codex", "skills", "harness-engineering-audit"),
@@ -185,7 +189,14 @@ def find_manifests(root: Path) -> List[Dict[str, Any]]:
 
 def find_docs(root: Path) -> Dict[str, Any]:
     docs_dir = root / "docs"
-    docs: Dict[str, Any] = {"exists": docs_dir.exists(), "files": [], "indexes": [], "authority_docs": [], "generated_policy_docs": []}
+    docs: Dict[str, Any] = {
+        "exists": docs_dir.exists(),
+        "files": [],
+        "indexes": [],
+        "authority_docs": [],
+        "generated_policy_docs": [],
+        "review_guidance_docs": [],
+    }
     if not docs_dir.exists():
         return docs
     for path in iter_files(docs_dir):
@@ -200,10 +211,13 @@ def find_docs(root: Path) -> Dict[str, Any]:
                 docs["authority_docs"].append(r)
             if re.search(r"generated artifact|artifact policy|golden|snapshot|report lifecycle", text, re.I):
                 docs["generated_policy_docs"].append(r)
+            if re.search(r"(deterministic|automated checks?).{0,120}(review|judgment|human)|judgment-based.{0,80}review|human review", text, re.I | re.S):
+                docs["review_guidance_docs"].append(r)
     docs["files"] = sorted(docs["files"])
     docs["indexes"] = sorted(set(docs["indexes"]))
     docs["authority_docs"] = sorted(set(docs["authority_docs"]))
     docs["generated_policy_docs"] = sorted(set(docs["generated_policy_docs"]))
+    docs["review_guidance_docs"] = sorted(set(docs["review_guidance_docs"]))
     return docs
 
 
@@ -466,7 +480,8 @@ def find_omx(root: Path) -> Dict[str, Any]:
             out["other_files"].append(r)
     for k in ["contexts", "plans", "other_files"]:
         out[k] = sorted(out[k])[:500]
-    out["exists"] = bool(out["contexts"] or out["plans"] or out["other_files"])
+    has_non_runtime_omx_dirs = any((omx_dir / name).exists() for name in ["context", "plans", "interviews"])
+    out["exists"] = bool(out["contexts"] or out["plans"] or out["other_files"] or has_non_runtime_omx_dirs)
     return out
 
 
@@ -499,6 +514,7 @@ def find_cross_agent(root: Path) -> Dict[str, Any]:
 def marker_scan(root: Path) -> Dict[str, Any]:
     counts = {m: 0 for m in SCAFFOLD_MARKERS}
     examples: Dict[str, List[str]] = {m: [] for m in SCAFFOLD_MARKERS}
+    affected_files: set[str] = set()
     total_files = 0
     for path in iter_files(root):
         text = read_text(path, limit=500_000)
@@ -510,9 +526,10 @@ def marker_scan(root: Path) -> Dict[str, Any]:
             c = lower.count(marker)
             if c:
                 counts[marker] += c
+                affected_files.add(rel(path, root))
                 if len(examples[marker]) < 10:
                     examples[marker].append(rel(path, root))
-    return {"counts": counts, "examples": examples, "text_files_scanned": total_files}
+    return {"counts": counts, "affected_files": sorted(affected_files), "examples": examples, "text_files_scanned": total_files}
 
 
 def generated_artifacts(root: Path) -> Dict[str, Any]:

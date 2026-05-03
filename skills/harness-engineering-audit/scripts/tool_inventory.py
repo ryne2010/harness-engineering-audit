@@ -25,6 +25,19 @@ def _script_names(inventory: Dict[str, Any]) -> List[str]:
     return sorted(names)
 
 
+def _has_python_test_runner(scripts: List[str]) -> bool:
+    hints = {"pytest", "unittest", "nose", "tox", "nox", "test", "tests", "smoke", "validate", "check"}
+    for script in scripts:
+        lower = script.lower()
+        target = lower.rsplit("::", 1)[-1]
+        tokens = {target}
+        tokens.update(target.replace("-", "_").replace(":", "_").split("_"))
+        tokens.update(target.replace("_", "-").replace(":", "-").split("-"))
+        if hints & tokens or any(hint in lower for hint in {"pytest", "unittest", "nose", "tox", "nox"}):
+            return True
+    return False
+
+
 def inventory_tools(repo: str | Path, inventory: Dict[str, Any], stack_inventory: Dict[str, Any]) -> Dict[str, Any]:
     root = Path(repo).resolve()
     tags = _stack_tags(stack_inventory)
@@ -105,7 +118,7 @@ def inventory_tools(repo: str | Path, inventory: Dict[str, Any], stack_inventory
             "evidence_paths": ["package.json"],
             "severity": "medium",
         })
-    if "python" in tags and not any("pytest" in s.lower() for s in scripts):
+    if "python" in tags and not _has_python_test_runner(scripts):
         capability_gaps.append({
             "id": "python-test-runner",
             "capability": "Python test runner discoverability",

@@ -13,6 +13,11 @@ gh skill publish --dry-run
 gh skill publish --tag v0.2.0
 ```
 
+The release workflow computes the next `v0.2.x` tag and stamps
+`skills/harness-engineering-audit/release.json` plus the plugin mirror copy before
+`gh skill publish`. That package-local metadata lets installed skills distinguish
+the exact release tag from the static development version in `SKILL.md`.
+
 ## Test install
 
 ```bash

@@ -17,12 +17,16 @@ SCHEMA = "harness.stack-inventory.v1"
 IGNORE_DIRS = {
     ".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
     ".next", ".nuxt", "coverage", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".history",
 }
 
 AUDIT_SIGNAL_EXCLUDED_PREFIXES = {
     (".codex", "reports"),
     (".omx", "cache"),
+    (".omx", "context"),
+    (".omx", "interviews"),
     (".omx", "state"),
+    (".omx", "plans"),
     (".omx", "logs"),
     (".agents", "skills", "harness-engineering-audit"),
     (".codex", "skills", "harness-engineering-audit"),

@@ -198,6 +198,7 @@ harness-engineering-audit/
     harness-engineering-audit/
       SKILL.md
       agents/openai.yaml
+      release.json
       scripts/*.py
       assets/*
       references/*
@@ -206,6 +207,7 @@ harness-engineering-audit/
       .codex-plugin/plugin.json
       skills/harness-engineering-audit/
   .agents/plugins/marketplace.json
+  tests/check_skill_mirror.py
   tests/smoke/run_skill_smoke.py
 ```
 
@@ -218,7 +220,8 @@ make validate
 Equivalent commands:
 
 ```bash
-python3 -m py_compile skills/harness-engineering-audit/scripts/*.py tests/smoke/run_skill_smoke.py
+python3 -m py_compile skills/harness-engineering-audit/scripts/*.py tests/smoke/run_skill_smoke.py tests/check_skill_mirror.py
+python3 tests/check_skill_mirror.py
 python3 tests/smoke/run_skill_smoke.py
 ```
 

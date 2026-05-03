@@ -117,13 +117,6 @@ jobs:
         run: |
           python3 tests/smoke/run_skill_smoke.py
 
-      - name: Validate skill package
-        if: steps.changes.outputs.release_relevant == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh skill publish --dry-run
-
       - name: Compute next release tag
         if: steps.changes.outputs.release_relevant == 'true'
         id: version
@@ -149,6 +142,38 @@ jobs:
 
           echo "tag=$next" >> "$GITHUB_OUTPUT"
           echo "Next release tag: $next"
+
+      - name: Stamp release metadata
+        if: steps.changes.outputs.release_relevant == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          version = tag.lstrip("v")
+          payload = {
+              "schema": "harness-engineering-audit.release.v1",
+              "version": version,
+              "tag": tag,
+          }
+          for path in [
+              Path("skills/harness-engineering-audit/release.json"),
+              Path("plugins/harness-engineering-audit/skills/harness-engineering-audit/release.json"),
+          ]:
+              path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+          PY
+          python3 tests/check_skill_mirror.py
+
+      - name: Validate skill package
+        if: steps.changes.outputs.release_relevant == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh skill publish --dry-run
 
       - name: Publish skill release
         if: steps.changes.outputs.release_relevant == 'true'

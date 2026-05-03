@@ -464,7 +464,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         s = add(s, 1, evidence, "tools/dev manifest-like files detected.")
     if docs.get("generated_policy_docs"):
         s = add(s, 1, evidence, "Generated artifact policy exists.")
-    review_docs = [
+    review_docs = list(docs.get("review_guidance_docs", [])) or [
         p for p in docs.get("files", [])
         if any(term in p.lower() for term in ["review", "pr", "pull_request", "quality"])
     ]
@@ -572,19 +572,20 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     # 14 Entropy/scaffolding
     evidence, gaps, recs = [], [], []
     counts = markers.get("counts", {})
-    total_markers = sum(int(v) for v in counts.values()) if counts else 0
+    affected_files = markers.get("affected_files", [])
+    total_markers = len(affected_files) if affected_files else (sum(int(v) for v in counts.values()) if counts else 0)
     s = 8
     if total_markers == 0:
         s = add(s, 1, evidence, "No scaffold/legacy marker hits detected.")
     elif total_markers < 50:
-        evidence.append(f"Detected {total_markers} scaffold/legacy marker hits.")
+        evidence.append(f"Detected scaffold/legacy marker hits across {total_markers} files.")
         s -= 1
     elif total_markers < 250:
-        evidence.append(f"Detected {total_markers} scaffold/legacy marker hits.")
+        evidence.append(f"Detected scaffold/legacy marker hits across {total_markers} files.")
         gaps.append("Moderate scaffold/legacy marker entropy detected.")
         s -= 3
     else:
-        evidence.append(f"Detected {total_markers} scaffold/legacy marker hits.")
+        evidence.append(f"Detected scaffold/legacy marker hits across {total_markers} files.")
         gaps.append("High scaffold/legacy marker entropy detected.")
         s -= 5
     if docs.get("generated_policy_docs"):

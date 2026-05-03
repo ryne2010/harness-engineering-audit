@@ -165,6 +165,40 @@ def assert_makefile_validation_discovery() -> bool:
         if any(gap.get("id") == "validation-command-discovery" for gap in tools.get("capability_gaps", [])):
             print(f"Makefile validation targets should satisfy tool inventory validation discovery: {tools}", file=sys.stderr)
             return False
+        if any(gap.get("id") == "python-test-runner" for gap in tools.get("capability_gaps", [])):
+            print(f"Makefile validation targets should satisfy Python test-runner discovery: {tools}", file=sys.stderr)
+            return False
+    return True
+
+
+def assert_ignored_runtime_noise_excluded() -> bool:
+    if str(SKILL_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SKILL_SCRIPTS))
+    from harness_inventory import collect_inventory  # noqa: PLC0415
+    from stack_detect import detect_stack  # noqa: PLC0415
+
+    with tempfile.TemporaryDirectory(prefix="harness-audit-noise-") as td:
+        repo = Path(td)
+        (repo / "README.md").write_text("# Noise fixture\n", encoding="utf-8")
+        (repo / ".history").mkdir()
+        (repo / ".history" / "old.md").write_text("legacy stage " * 200, encoding="utf-8")
+        (repo / ".omx" / "context").mkdir(parents=True)
+        (repo / ".omx" / "context" / "old.md").write_text("temporary preview " * 200, encoding="utf-8")
+        (repo / ".omx" / "plans").mkdir(parents=True)
+        (repo / ".omx" / "plans" / "old.md").write_text("todo scaffold " * 200, encoding="utf-8")
+        inventory = collect_inventory(repo)
+        counts = inventory.get("markers", {}).get("counts", {})
+        if any(counts.get(marker, 0) for marker in {"legacy", "stage", "temporary", "preview", "todo", "scaffold"}):
+            print(f"ignored runtime/history noise should not affect marker counts: {inventory.get('markers')}", file=sys.stderr)
+            return False
+        stack = detect_stack(repo, inventory)
+        evidence = "\n".join(
+            "\n".join(str(item) for item in tag.get("evidence", []))
+            for tag in stack.get("stack_tags", [])
+        )
+        if ".history" in evidence or ".omx/context" in evidence or ".omx/plans" in evidence:
+            print(f"ignored runtime/history noise leaked into stack evidence: {stack}", file=sys.stderr)
+            return False
     return True
 
 
@@ -176,6 +210,7 @@ def assert_update_patch_availability() -> bool:
     original_which_gh = check_update.which_gh
     original_gh_skill_available = check_update.gh_skill_available
     original_latest_release_tag = check_update.latest_release_tag
+    original_candidate_skill_dirs = check_update.candidate_skill_dirs
 
     try:
         check_update.which_gh = lambda: "/usr/bin/gh"
@@ -192,6 +227,28 @@ def assert_update_patch_availability() -> bool:
             print(f"newer patch release should be available: {patch_release}", file=sys.stderr)
             return False
 
+        with tempfile.TemporaryDirectory(prefix="harness-audit-release-meta-") as td:
+            skill_dir = Path(td) / "harness-engineering-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text("---\nname: test\nversion: 0.2.0\n---\n", encoding="utf-8")
+            (skill_dir / "release.json").write_text(
+                json.dumps({
+                    "schema": "harness-engineering-audit.release.v1",
+                    "version": "0.2.37",
+                    "tag": "v0.2.37",
+                }),
+                encoding="utf-8",
+            )
+            check_update.candidate_skill_dirs = lambda _repo_or_skill: [skill_dir]
+            release_match = check_update.check_update(skill_dir)
+            if release_match.get("status") != "current" or release_match.get("version_match_strategy") != "exact":
+                print(f"release metadata should make latest patch current: {release_match}", file=sys.stderr)
+                return False
+            if not str(release_match.get("installed_version_source", "")).endswith("release.json"):
+                print(f"release metadata should be the installed version source: {release_match}", file=sys.stderr)
+                return False
+            check_update.candidate_skill_dirs = original_candidate_skill_dirs
+
         check_update.latest_release_tag = lambda: ("v0.3.0", None)
         next_line = check_update.check_update(REPO_ROOT)
         if next_line.get("status") != "available" or next_line.get("version_match_strategy") != "newer-release-available":
@@ -201,6 +258,7 @@ def assert_update_patch_availability() -> bool:
         check_update.which_gh = original_which_gh
         check_update.gh_skill_available = original_gh_skill_available
         check_update.latest_release_tag = original_latest_release_tag
+        check_update.candidate_skill_dirs = original_candidate_skill_dirs
     return True
 
 
@@ -296,6 +354,8 @@ def main() -> int:
     if not assert_no_recommend_tools_skips_catalog():
         return 1
     if not assert_makefile_validation_discovery():
+        return 1
+    if not assert_ignored_runtime_noise_excluded():
         return 1
     if not assert_update_patch_availability():
         return 1

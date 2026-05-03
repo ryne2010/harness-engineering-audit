@@ -93,6 +93,15 @@ def parse_pyproject_version(path: Path) -> Optional[str]:
     return None
 
 
+def parse_release_metadata(path: Path) -> Optional[str]:
+    try:
+        data = json.loads(read_text(path) or "{}")
+    except json.JSONDecodeError:
+        return None
+    version = data.get("version") or data.get("tag")
+    return str(version).strip() if version else None
+
+
 def candidate_skill_dirs(repo_or_skill: Path) -> Iterable[Path]:
     script_skill_dir = Path(__file__).resolve().parents[1]
     yield script_skill_dir
@@ -113,7 +122,12 @@ def detect_installed_version(repo_or_skill: Path) -> tuple[Optional[str], Dict[s
         seen.add(skill_dir)
         skill_md = skill_dir / "SKILL.md"
         yaml_path = skill_dir / "agents" / "openai.yaml"
+        release_path = skill_dir / "release.json"
         details["sources_checked"].append(str(skill_md))
+        release_version = parse_release_metadata(release_path) if release_path.exists() else None
+        if release_version:
+            details["version_source"] = str(release_path)
+            return release_version, details
         frontmatter = parse_frontmatter(read_text(skill_md)) if skill_md.exists() else {}
         if frontmatter.get("version"):
             details["version_source"] = str(skill_md)
