@@ -17,6 +17,62 @@ LANE_CATALOG = REPO_ROOT / "skills" / "harness-engineering-audit" / "assets" / "
 SKILL_SCRIPTS = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts"
 
 
+def assert_recommendation_helper_edges() -> bool:
+    if str(SKILL_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SKILL_SCRIPTS))
+    from harness_score import dedupe_recommendations, normalize_recommendation, summarize_recommendations  # noqa: PLC0415
+
+    invalid_risk = normalize_recommendation({"risk": "surprising", "title": "Odd", "detail": "Fallback"})
+    if invalid_risk.get("risk") != "medium" or invalid_risk.get("approval") != "review-required" or invalid_risk.get("auto_approved"):
+        print(f"invalid risk should normalize to review-required medium: {invalid_risk}", file=sys.stderr)
+        return False
+
+    deduped = dedupe_recommendations([
+        {
+            "risk": "low",
+            "category": "same",
+            "title": "Same title",
+            "detail": "Same detail",
+            "dimension": "Dimension A",
+            "source": "source-a",
+            "evidence": ["one"],
+            "priority": "p2",
+        },
+        {
+            "risk": "low",
+            "category": "same",
+            "title": "Same title",
+            "detail": "Same detail",
+            "dimension": "Dimension B",
+            "source": "source-b",
+            "evidence": ["one", "two"],
+            "priority": "p0",
+        },
+    ])
+    if len(deduped) != 1:
+        print(f"duplicate recommendations should merge: {deduped}", file=sys.stderr)
+        return False
+    merged = deduped[0]
+    if merged.get("priority") != "p0":
+        print(f"duplicate merge should keep highest priority: {merged}", file=sys.stderr)
+        return False
+    if set(merged.get("sources", [])) != {"source-a", "source-b"}:
+        print(f"duplicate merge should keep sources: {merged}", file=sys.stderr)
+        return False
+    if set(merged.get("related_dimensions", [])) != {"Dimension A", "Dimension B"}:
+        print(f"duplicate merge should keep dimensions: {merged}", file=sys.stderr)
+        return False
+    if set(merged.get("evidence", [])) != {"one", "two"}:
+        print(f"duplicate merge should dedupe evidence: {merged}", file=sys.stderr)
+        return False
+
+    summary = summarize_recommendations(deduped, [invalid_risk], [])
+    if summary.get("low_risk") != 1 or summary.get("medium_risk") != 1 or summary.get("auto_approved") != 1 or summary.get("review_required") != 1:
+        print(f"recommendation summary helper edge mismatch: {summary}", file=sys.stderr)
+        return False
+    return True
+
+
 def assert_recommendation_contract(score: dict, label: str) -> bool:
     recs = score.get("recommendations", {})
     buckets = [
@@ -76,6 +132,8 @@ def main() -> int:
         return 1
     if not CHECK_UPDATE.exists():
         print(f"missing check_update.py at {CHECK_UPDATE}", file=sys.stderr)
+        return 1
+    if not assert_recommendation_helper_edges():
         return 1
 
     with tempfile.TemporaryDirectory(prefix="harness-audit-smoke-") as td:
@@ -398,6 +456,9 @@ def main() -> int:
         if "## Skill update status" not in report_text or "gh skill update --all" not in report_text:
             print("report missing skill update status safety section", file=sys.stderr)
             return 1
+        if "OMX interactive default: select **Plan auto-approved fixes**" not in report_text or "$ralplan \"Read" not in report_text:
+            print("main report should show ralplan as the default manual command for brownfield fixture", file=sys.stderr)
+            return 1
         update_status = json.loads((out / "update-status.json").read_text(encoding="utf-8"))
         if update_status.get("action_taken") != "none":
             print("normal audit must not trigger self-update", file=sys.stderr)
@@ -692,6 +753,10 @@ def main() -> int:
         minimal_decision = minimal_next.get("decision", {})
         if minimal_decision.get("default_stage") != "safe-setup" or "Greenfield" not in minimal_decision.get("reason", ""):
             print(f"minimal next-step decision should explain safe setup: {minimal_next}", file=sys.stderr)
+            return 1
+        minimal_report = (minimal_out / "report.md").read_text(encoding="utf-8")
+        if "OMX interactive default: select **Run safe setup**" not in minimal_report or "--mode safe-setup" not in minimal_report:
+            print("minimal report should show safe-setup as the default manual command", file=sys.stderr)
             return 1
         if (minimal / "AGENTS.md").exists() or (minimal / "docs").exists():
             print("audit mode must not create source harness files", file=sys.stderr)

@@ -117,6 +117,13 @@ def stage_label(stage: str) -> str:
     return STAGE_LABELS.get(stage, stage)
 
 
+def default_stage_entry(next_step: Dict[str, Any]) -> Dict[str, Any]:
+    return next(
+        (stage for stage in next_step.get("stages", []) if stage.get("stage") == next_step.get("default_stage")),
+        {},
+    )
+
+
 def score_table(scorecard: Dict[str, Any]) -> str:
     lines = ["| Dimension | Score | Status |", "|---|---:|---|"]
     for d in scorecard.get("dimensions", []):
@@ -469,7 +476,7 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
 def render_next_step_markdown(paths: Dict[str, str], inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
     next_step = render_next_step_json(paths, inventory, scorecard)
     decision = next_step["decision"]
-    default_label = next((stage["label"] for stage in next_step["stages"] if stage["stage"] == next_step["default_stage"]), "Plan auto-approved fixes")
+    default_label = default_stage_entry(next_step).get("label", "Plan auto-approved fixes")
     lines = [
         "# Harness Engineering Audit: Next Step",
         "",
@@ -878,8 +885,11 @@ def render_main_report(
     doc_gardening = inventory.get("doc_gardening_readiness", {})
     marker_counts = inventory.get("markers", {}).get("counts", {})
     total_markers = sum(int(v) for v in marker_counts.values()) if marker_counts else 0
-    next_decision = next_step_decision_for(inventory, scorecard)
-    next_stage_label = stage_label(next_decision["default_stage"])
+    next_step = render_next_step_json(paths, inventory, scorecard)
+    next_decision = next_step["decision"]
+    next_stage = default_stage_entry(next_step)
+    next_stage_label = next_stage.get("label", stage_label(next_decision["default_stage"]))
+    next_stage_command = next_stage.get("command", prompt_command("$ralplan", paths["ralplan_prompt"]))
 
     return f"""# Harness Engineering Audit Report
 
@@ -965,7 +975,7 @@ Use the generated next-step artifacts instead of retyping long prompts.
 If you need a manual command:
 
 ```text
-{prompt_command('$ralplan', paths['ralplan_prompt'])}
+{next_stage_command}
 ```
 """
 
