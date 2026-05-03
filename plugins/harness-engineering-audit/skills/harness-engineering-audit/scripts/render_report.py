@@ -19,12 +19,18 @@ STAGE_LABELS = {
 }
 
 
-def safe_prepare_output_dir(out_dir: Path, force: bool = False) -> None:
+def default_report_dir_for_inventory(inventory: Dict[str, Any]) -> Path:
+    repo_root = Path(str(inventory.get("repo_root") or ".")).resolve()
+    return repo_root / ".codex" / "reports" / "harness-engineering-audit"
+
+
+def safe_prepare_output_dir(out_dir: Path, force: bool = False, default_report_dir: Path | None = None) -> None:
     out_dir = out_dir.resolve()
+    default_report_dir = default_report_dir.resolve() if default_report_dir else None
     if out_dir.exists():
         marker = out_dir / REPORT_MARKER
-        safe_name = out_dir.name == "harness-engineering-audit"
-        if not (force or marker.exists() or safe_name):
+        is_default_report_dir = default_report_dir is not None and out_dir == default_report_dir
+        if not (force or marker.exists() or is_default_report_dir):
             raise SystemExit(
                 f"Refusing to overwrite unmarked output directory: {out_dir}\n"
                 f"Use --force only if this is intentional."
@@ -1168,7 +1174,7 @@ def write_reports(
     update_status: Dict[str, Any] | None = None,
     mode: str = "audit",
 ) -> None:
-    safe_prepare_output_dir(out_dir, force=force)
+    safe_prepare_output_dir(out_dir, force=force, default_report_dir=default_report_dir_for_inventory(inventory))
     paths = build_path_context(inventory, out_dir)
     stack_inventory = stack_inventory or {"schema": "harness.stack-inventory.v1", "stack_tags": [], "profile_groups": {}}
     tool_inventory = tool_inventory or {

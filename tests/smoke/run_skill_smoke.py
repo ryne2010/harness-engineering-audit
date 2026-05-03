@@ -401,6 +401,31 @@ def main() -> int:
             print(f"unexpected check_update payload: {check_payload}", file=sys.stderr)
             return 1
 
+        dangerous_out = Path(td) / "harness-engineering-audit"
+        dangerous_out.mkdir()
+        sentinel = dangerous_out / "sentinel.txt"
+        sentinel.write_text("custom output must not be deleted\n", encoding="utf-8")
+        custom_out_result = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(repo), "--out", str(dangerous_out), "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if custom_out_result.returncode == 0:
+            print("audit should refuse an unmarked custom output directory", file=sys.stderr)
+            return 1
+        if not sentinel.exists():
+            print("audit deleted an unmarked custom output directory", file=sys.stderr)
+            return 1
+        if "Refusing to overwrite unmarked output directory" not in custom_out_result.stderr:
+            print(f"unexpected custom output refusal: {custom_out_result.stderr}", file=sys.stderr)
+            return 1
+
+        default_out = repo / ".codex" / "reports" / "harness-engineering-audit"
+        default_out.mkdir(parents=True)
+        legacy_default_file = default_out / "legacy.txt"
+        legacy_default_file.write_text("default report directory may be regenerated\n", encoding="utf-8")
         result = subprocess.run(
             [sys.executable, "-S", str(RUN_AUDIT), str(repo)],
             cwd=str(REPO_ROOT),
@@ -414,6 +439,9 @@ def main() -> int:
             return result.returncode
 
         out = repo / ".codex" / "reports" / "harness-engineering-audit"
+        if legacy_default_file.exists():
+            print("audit did not regenerate the default report directory", file=sys.stderr)
+            return 1
         expected = [
             "inventory.json",
             "scorecard.json",
