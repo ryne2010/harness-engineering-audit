@@ -19,6 +19,22 @@ IGNORE_DIRS = {
     ".next", ".nuxt", "coverage", ".pytest_cache", ".mypy_cache", ".ruff_cache",
 }
 
+AUDIT_SIGNAL_EXCLUDED_PREFIXES = {
+    (".codex", "reports"),
+    (".omx", "state"),
+    (".omx", "logs"),
+    (".agents", "skills", "harness-engineering-audit"),
+    (".codex", "skills", "harness-engineering-audit"),
+    ("docs", "harness"),
+}
+
+
+def _is_ignored_path(path: str | Path) -> bool:
+    parts = Path(path).parts
+    if any(part in IGNORE_DIRS for part in parts):
+        return True
+    return any(parts[:len(prefix)] == prefix for prefix in AUDIT_SIGNAL_EXCLUDED_PREFIXES)
+
 
 def _manifest_paths(inventory: Dict[str, Any]) -> set[str]:
     return {str(item.get("path", "")) for item in inventory.get("manifests", [])}
@@ -46,7 +62,7 @@ def _all_paths(inventory: Dict[str, Any]) -> List[str]:
                             paths.append(item)
                         elif isinstance(item, dict) and item.get("path"):
                             paths.append(str(item["path"]))
-    return sorted(set(paths))
+    return sorted({path for path in paths if not _is_ignored_path(path)})
 
 
 def _repo_paths(root: Path, limit: int = 4000) -> List[str]:
@@ -58,7 +74,7 @@ def _repo_paths(root: Path, limit: int = 4000) -> List[str]:
             rel = path.relative_to(root)
         except ValueError:
             continue
-        if any(part in IGNORE_DIRS for part in rel.parts):
+        if _is_ignored_path(rel):
             continue
         if path.is_file():
             paths.append(str(rel))

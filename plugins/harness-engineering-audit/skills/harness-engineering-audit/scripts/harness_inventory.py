@@ -18,6 +18,14 @@ IGNORE_DIRS = {
     "Library", "Temp", "Logs", "DerivedData", ".idea", ".vscode"
 }
 
+AUDIT_SIGNAL_EXCLUDED_PREFIXES = {
+    (".codex", "reports"),
+    (".omx", "state"),
+    (".omx", "logs"),
+    (".agents", "skills", "harness-engineering-audit"),
+    (".codex", "skills", "harness-engineering-audit"),
+}
+
 TEXT_EXTS = {
     ".md", ".txt", ".toml", ".json", ".yaml", ".yml", ".js", ".jsx",
     ".ts", ".tsx", ".py", ".rb", ".go", ".rs", ".java", ".kt", ".cs",
@@ -63,15 +71,19 @@ def rel(path: Path, root: Path) -> str:
 
 
 def is_ignored(path: Path) -> bool:
-    return any(part in IGNORE_DIRS for part in path.parts)
+    parts = path.parts
+    if any(part in IGNORE_DIRS for part in parts):
+        return True
+    return any(parts[:len(prefix)] == prefix for prefix in AUDIT_SIGNAL_EXCLUDED_PREFIXES)
 
 
 def iter_files(root: Path) -> Iterable[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
         current = Path(dirpath)
-        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
         if is_ignored(current.relative_to(root) if current != root else Path("")):
+            dirnames[:] = []
             continue
+        dirnames[:] = [d for d in dirnames if not is_ignored((current / d).relative_to(root))]
         for filename in filenames:
             path = current / filename
             if not is_ignored(path.relative_to(root)):
@@ -114,6 +126,8 @@ def find_instruction_files(root: Path) -> List[Dict[str, Any]]:
 def find_paths(root: Path, candidates: Iterable[str]) -> List[str]:
     found = []
     for candidate in candidates:
+        if is_ignored(Path(candidate)):
+            continue
         p = root / candidate
         if p.exists():
             found.append(candidate)
@@ -372,7 +386,7 @@ def find_doc_gardening_surfaces(root: Path) -> Dict[str, Any]:
 
 
 def find_codex(root: Path) -> Dict[str, Any]:
-    codex: Dict[str, Any] = {"exists": (root / ".codex").exists(), "config": None, "mcp_servers": [], "hooks": None, "rules": [], "prompts": [], "reports": []}
+    codex: Dict[str, Any] = {"exists": False, "config": None, "mcp_servers": [], "hooks": None, "rules": [], "prompts": [], "reports": []}
     config = root / ".codex" / "config.toml"
     if config.exists():
         text = read_text(config) or ""
@@ -384,7 +398,8 @@ def find_codex(root: Path) -> Dict[str, Any]:
     for sub in ["rules", "prompts", "reports"]:
         d = root / ".codex" / sub
         if d.exists():
-            codex[sub] = sorted(rel(p, root) for p in iter_files(d))[:500]
+            codex[sub] = sorted(rel(p, root) for p in iter_files(d) if not is_ignored(p.relative_to(root)))[:500]
+    codex["exists"] = bool(codex["config"] or codex["hooks"] or codex["rules"] or codex["prompts"])
     return codex
 
 
@@ -396,6 +411,8 @@ def find_skills(root: Path) -> Dict[str, Any]:
         if not base.exists():
             continue
         for skill_md in base.glob("*/SKILL.md"):
+            if is_ignored(skill_md.relative_to(root)):
+                continue
             text = read_text(skill_md) or ""
             name = skill_md.parent.name
             m = re.search(r"^name:\s*([^\n]+)", text, flags=re.M)
@@ -412,10 +429,12 @@ def find_skills(root: Path) -> Dict[str, Any]:
 
 def find_omx(root: Path) -> Dict[str, Any]:
     omx_dir = root / ".omx"
-    out: Dict[str, Any] = {"exists": omx_dir.exists(), "contexts": [], "plans": [], "other_files": []}
+    out: Dict[str, Any] = {"exists": False, "contexts": [], "plans": [], "other_files": []}
     if not omx_dir.exists():
         return out
     for path in iter_files(omx_dir):
+        if is_ignored(path.relative_to(root)):
+            continue
         r = rel(path, root)
         if ".omx/context" in r:
             out["contexts"].append(r)
@@ -425,6 +444,7 @@ def find_omx(root: Path) -> Dict[str, Any]:
             out["other_files"].append(r)
     for k in ["contexts", "plans", "other_files"]:
         out[k] = sorted(out[k])[:500]
+    out["exists"] = bool(out["contexts"] or out["plans"] or out["other_files"])
     return out
 
 
@@ -479,11 +499,12 @@ def generated_artifacts(root: Path) -> Dict[str, Any]:
     for dirpath, dirnames, _ in os.walk(root):
         current = Path(dirpath)
         if is_ignored(current.relative_to(root) if current != root else Path("")):
+            dirnames[:] = []
             continue
         name = current.name.lower()
         if any(p in name for p in patterns):
             dirs.append(rel(current, root))
-        dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
+        dirnames[:] = [d for d in dirnames if not is_ignored((current / d).relative_to(root))]
     return {"candidate_dirs": sorted(set(dirs))[:500]}
 
 

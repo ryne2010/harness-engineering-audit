@@ -90,6 +90,47 @@ def assert_tool_catalog_loader() -> bool:
     return True
 
 
+def assert_no_recommend_tools_skips_catalog() -> bool:
+    if str(SKILL_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SKILL_SCRIPTS))
+    import recommend_tools  # noqa: PLC0415
+
+    original_loader = recommend_tools.load_tool_catalog
+
+    def fail_loader():
+        raise RuntimeError("catalog loader should not be called when recommendations are disabled")
+
+    recommend_tools.load_tool_catalog = fail_loader
+    try:
+        result = recommend_tools.generate_recommendations(
+            {"stack_tags": [{"tag": "python"}]},
+            {"native_capabilities": []},
+            recommend_tools=False,
+            web_requested=True,
+        )
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return False
+    finally:
+        recommend_tools.load_tool_catalog = original_loader
+
+    policy = result.get("policy", {})
+    queue = result.get("web_verification_queue", {})
+    if policy.get("recommend_tools") is not False:
+        print(f"disabled recommendations should set policy false: {result}", file=sys.stderr)
+        return False
+    if result.get("catalog_last_reviewed") is not None:
+        print(f"disabled recommendations should not load catalog metadata: {result}", file=sys.stderr)
+        return False
+    if result.get("recommendations") or result.get("suppressions") or queue.get("entries"):
+        print(f"disabled recommendations should emit no recommendation work: {result}", file=sys.stderr)
+        return False
+    if queue.get("verification_mode") != "recommendations-disabled":
+        print(f"disabled recommendations should mark queue disabled: {queue}", file=sys.stderr)
+        return False
+    return True
+
+
 def assert_recommendation_contract(score: dict, label: str) -> bool:
     recs = score.get("recommendations", {})
     buckets = [
@@ -178,6 +219,8 @@ def main() -> int:
     if not assert_recommendation_helper_edges():
         return 1
     if not assert_tool_catalog_loader():
+        return 1
+    if not assert_no_recommend_tools_skips_catalog():
         return 1
 
     with tempfile.TemporaryDirectory(prefix="harness-audit-smoke-") as td:
@@ -840,6 +883,79 @@ def main() -> int:
         noise_tags = {item.get("tag") for item in noise_stack.get("stack_tags", [])}
         if {"security-sensitive", "ai-ml"} & noise_tags:
             print(f"substring noise should not create security/AI stack tags: {sorted(noise_tags)}", file=sys.stderr)
+            return 1
+
+        self_noise = Path(td) / "self-noise"
+        self_noise.mkdir()
+        (self_noise / ".codex" / "reports" / "harness-engineering-audit").mkdir(parents=True)
+        (self_noise / ".codex" / "reports" / "harness-engineering-audit" / "report.md").write_text(
+            "# Generated Report\n\n"
+            "Symphony control plane task-state handoff. Doc gardening knowledge base. "
+            "Source of truth, validation, recovery, evidence, queue, release, artifact lifecycle.\n",
+            encoding="utf-8",
+        )
+        (self_noise / ".omx" / "state" / "sessions" / "example").mkdir(parents=True)
+        (self_noise / ".omx" / "state" / "sessions" / "example" / "autopilot-state.json").write_text(
+            json.dumps(
+                {
+                    "mode": "autopilot",
+                    "current_phase": "validation",
+                    "notes": "workflow handoff control plane trace evidence reconcile retry",
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        (self_noise / ".omx" / "logs").mkdir(parents=True)
+        (self_noise / ".omx" / "logs" / "trace.log").write_text(
+            "trace evidence validation workflow handoff\n",
+            encoding="utf-8",
+        )
+        (self_noise / ".agents" / "skills" / "harness-engineering-audit").mkdir(parents=True)
+        (self_noise / ".agents" / "skills" / "harness-engineering-audit" / "SKILL.md").write_text(
+            "---\nname: harness-engineering-audit\n---\n"
+            "# Harness Engineering Audit\n\n"
+            "AGENTS.md Codex OMX MCP Symphony doc gardening task contract role topology.\n",
+            encoding="utf-8",
+        )
+        self_noise_result = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(self_noise), "--mode", "audit", "--no-check-update", "--no-recommend-tools"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if self_noise_result.returncode != 0:
+            print(self_noise_result.stdout)
+            print(self_noise_result.stderr, file=sys.stderr)
+            return self_noise_result.returncode
+        self_noise_out = self_noise / ".codex" / "reports" / "harness-engineering-audit"
+        self_noise_inventory = json.loads((self_noise_out / "inventory.json").read_text(encoding="utf-8"))
+        if self_noise_inventory.get("file_count_scanned") != 0:
+            print(f"self-owned runtime artifacts should not be scanned: {self_noise_inventory}", file=sys.stderr)
+            return 1
+        if self_noise_inventory.get("codex", {}).get("exists") or self_noise_inventory.get("omx", {}).get("exists"):
+            print(f"generated codex/omx runtime-only dirs should not count as readiness: {self_noise_inventory}", file=sys.stderr)
+            return 1
+        if self_noise_inventory.get("skills", {}).get("repo_skills"):
+            print(f"project-local copy of this skill should not count as a repo skill: {self_noise_inventory}", file=sys.stderr)
+            return 1
+        if self_noise_inventory.get("readiness_registry", {}).get("readiness_count") != 0:
+            print(f"self-owned artifacts should not satisfy readiness registry: {self_noise_inventory}", file=sys.stderr)
+            return 1
+        if self_noise_inventory.get("symphony_readiness", {}).get("readiness_count") != 0:
+            print(f"self-owned artifacts should not satisfy Symphony readiness: {self_noise_inventory}", file=sys.stderr)
+            return 1
+        self_noise_stack = json.loads((self_noise_out / "stack-inventory.json").read_text(encoding="utf-8"))
+        if self_noise_stack.get("stack_tags"):
+            print(f"self-owned artifacts should not create stack tags: {self_noise_stack}", file=sys.stderr)
+            return 1
+        self_noise_upgrades = json.loads((self_noise_out / "upgrade-recommendations.json").read_text(encoding="utf-8"))
+        if self_noise_upgrades.get("policy", {}).get("recommend_tools") is not False:
+            print(f"--no-recommend-tools should persist disabled policy: {self_noise_upgrades}", file=sys.stderr)
+            return 1
+        if self_noise_upgrades.get("recommendations") or self_noise_upgrades.get("web_verification_queue", {}).get("entries"):
+            print(f"--no-recommend-tools should not emit tool work: {self_noise_upgrades}", file=sys.stderr)
             return 1
 
         present_security = Path(td) / "present-security"

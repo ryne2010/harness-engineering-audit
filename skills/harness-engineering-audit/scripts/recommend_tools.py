@@ -114,64 +114,83 @@ def generate_recommendations(
     catalog_entries: List[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     tags = _tag_set(stack_inventory)
-    catalog_entries = list(catalog_entries) if catalog_entries is not None else load_tool_catalog()
     recommendations: List[Dict[str, Any]] = []
     suppressions: List[Dict[str, Any]] = []
     queue: List[Dict[str, Any]] = []
 
-    if recommend_tools:
-        for entry in catalog_entries:
-            if not tags.intersection(set(entry.get("stack_tags", []))):
-                continue
-            source = _base_source(entry, web_requested=web_requested)
-            primary_capability = str((entry.get("capabilities") or [entry.get("name")])[0])
-            covered = _capability_covered(tool_inventory, primary_capability)
-            common = {
-                "id": entry["id"],
-                "title": entry["name"],
-                "detected_evidence": sorted(tags.intersection(set(entry.get("stack_tags", [])))),
-                "stack_tags": sorted(set(entry.get("stack_tags", [])).intersection(tags)),
-                "capability_gap": primary_capability,
-                "expected_material_benefit": f"Improves {primary_capability} for agentic development workflows.",
-                "risk": "medium" if entry.get("install_commands") else "low",
-                "confidence": "medium" if source["freshness_status"] == "review-needed" else "high",
-                "approval_required": True,
-                "tooling_action_human_approval_required": True,
-                "audit_fix_auto_approved": False,
-                "install_config_mutation": False,
-                "install_commands": entry.get("install_commands", []),
-                "config_commands": entry.get("config_commands", []),
-                "validation_commands": entry.get("validation_commands", []),
-                "rollback_commands": entry.get("rollback_commands", []),
-                **source,
-            }
-            queue.append({
-                "id": entry["id"],
-                "source_url": entry.get("source_url"),
-                "trust_tier": entry.get("trust_tier"),
+    if not recommend_tools:
+        return {
+            "schema": SCHEMA,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "policy": dict(DEFAULT_POLICY, recommend_tools=False, web_requested=web_requested),
+            "source_trust_policy": SOURCE_TRUST_POLICY,
+            "catalog_last_reviewed": None,
+            "recommendations": recommendations,
+            "suppressions": suppressions,
+            "web_verification_queue": {
+                "schema": QUEUE_SCHEMA,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
                 "web_requested": web_requested,
                 "web_verified": False,
-                "verification_mode": "static-catalog",
-                "reason": "Confirm current official/high-trust installation and rollback guidance before action.",
-            })
-            if covered and entry["id"] in NATIVE_SUPPRESSIBLE_IDS:
-                suppressions.append({
-                    **common,
-                    "suppressed": True,
-                    "suppression_reason": "Native Codex/OMX capability already covers this gap.",
-                    "covered_by": [covered.get("id")],
-                    "evidence_paths": covered.get("evidence_paths", []),
-                    "unsuppress_if": "Native coverage is absent, unhealthy, or insufficient for the target repo's explicit need.",
-                })
-            else:
-                recommendations.append({
-                    **common,
-                    "suppressed": False,
-                    "suppression_reason": None,
-                    "covered_by": [],
-                })
+                "verification_mode": "recommendations-disabled",
+                "entries": queue,
+            },
+        }
 
-    if not recommendations and recommend_tools:
+    catalog_entries = list(catalog_entries) if catalog_entries is not None else load_tool_catalog()
+
+    for entry in catalog_entries:
+        if not tags.intersection(set(entry.get("stack_tags", []))):
+            continue
+        source = _base_source(entry, web_requested=web_requested)
+        primary_capability = str((entry.get("capabilities") or [entry.get("name")])[0])
+        covered = _capability_covered(tool_inventory, primary_capability)
+        common = {
+            "id": entry["id"],
+            "title": entry["name"],
+            "detected_evidence": sorted(tags.intersection(set(entry.get("stack_tags", [])))),
+            "stack_tags": sorted(set(entry.get("stack_tags", [])).intersection(tags)),
+            "capability_gap": primary_capability,
+            "expected_material_benefit": f"Improves {primary_capability} for agentic development workflows.",
+            "risk": "medium" if entry.get("install_commands") else "low",
+            "confidence": "medium" if source["freshness_status"] == "review-needed" else "high",
+            "approval_required": True,
+            "tooling_action_human_approval_required": True,
+            "audit_fix_auto_approved": False,
+            "install_config_mutation": False,
+            "install_commands": entry.get("install_commands", []),
+            "config_commands": entry.get("config_commands", []),
+            "validation_commands": entry.get("validation_commands", []),
+            "rollback_commands": entry.get("rollback_commands", []),
+            **source,
+        }
+        queue.append({
+            "id": entry["id"],
+            "source_url": entry.get("source_url"),
+            "trust_tier": entry.get("trust_tier"),
+            "web_requested": web_requested,
+            "web_verified": False,
+            "verification_mode": "static-catalog",
+            "reason": "Confirm current official/high-trust installation and rollback guidance before action.",
+        })
+        if covered and entry["id"] in NATIVE_SUPPRESSIBLE_IDS:
+            suppressions.append({
+                **common,
+                "suppressed": True,
+                "suppression_reason": "Native Codex/OMX capability already covers this gap.",
+                "covered_by": [covered.get("id")],
+                "evidence_paths": covered.get("evidence_paths", []),
+                "unsuppress_if": "Native coverage is absent, unhealthy, or insufficient for the target repo's explicit need.",
+            })
+        else:
+            recommendations.append({
+                **common,
+                "suppressed": False,
+                "suppression_reason": None,
+                "covered_by": [],
+            })
+
+    if not recommendations:
         recommendations.append({
             "id": "custom-harness-tooling-proposal",
             "title": "Custom harness tooling proposal",
