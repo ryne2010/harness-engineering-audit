@@ -31,9 +31,11 @@ Release validation should not run `harness-engineering-audit` against this sourc
 repo as its own quality signal. Use the fixture-based smoke tests in
 `make validate`, then use `gh skill publish --dry-run` for package validation.
 
-The hosted release job expects the runner's GitHub CLI to already support
-`gh skill`. If it does not, the workflow fails with a clear precondition error
-instead of installing a latest CLI package at runtime.
+The hosted release job upgrades the bundled runner GitHub CLI from the official
+`cli/cli` release before publishing, because `gh skill` is a preview surface and
+can lag on runner images. The workflow still checks `gh skill --help` after
+provisioning and fails with a clear precondition error if the selected CLI
+release does not provide the command.
 
 ## Manual fallback
 
@@ -69,5 +71,6 @@ python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py .
 - Keep release immutability enabled in GitHub settings.
 - Keep tag protection/versioning rules enabled for `v*` tags.
 - Keep code scanning enabled because the skill ships Python scripts.
-- Keep `gh skill` available on release runners; do not dynamically install the
-  latest GitHub CLI inside the release job.
+- Keep the official GitHub CLI provisioning step narrow: download from
+  `cli/cli`, install the Linux `.deb`, then verify `gh skill --help` before
+  package validation or publishing.

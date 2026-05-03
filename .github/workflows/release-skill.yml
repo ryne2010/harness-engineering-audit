@@ -57,15 +57,34 @@ jobs:
             --base-minor "$base_minor" \
             --github-output "$GITHUB_OUTPUT"
 
+      - name: Install GitHub CLI with gh skill support
+        if: steps.changes.outputs.release_relevant == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Bundled GitHub CLI:"
+          gh --version
+          mkdir -p "$RUNNER_TEMP/gh-cli"
+          gh release download \
+            --repo cli/cli \
+            --pattern 'gh_*_linux_amd64.deb' \
+            --dir "$RUNNER_TEMP/gh-cli" \
+            --clobber
+          sudo dpkg -i "$RUNNER_TEMP"/gh-cli/gh_*_linux_amd64.deb
+          echo "Provisioned GitHub CLI:"
+          gh --version
+
       - name: Verify GitHub CLI has gh skill support
         if: steps.changes.outputs.release_relevant == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          gh --version
           if ! gh skill --help >/dev/null 2>&1; then
-            echo "::error::GitHub CLI on this runner does not provide 'gh skill'. Use a runner image with gh skill support or publish manually from an environment that has it."
+            echo "::error::Provisioned GitHub CLI does not provide 'gh skill'. Use a runner image or release channel with gh skill support, or publish manually from an environment that has it."
             exit 1
           fi
 

@@ -25,7 +25,7 @@ git push
 
 4. Confirm the release workflow runs after the required main-branch workflow succeeds.
 5. Confirm the workflow selected the intended metadata-derived `vX.Y` train and next patch tag.
-6. Confirm the release runner already has `gh skill`; the workflow must not install a latest GitHub CLI at runtime.
+6. Confirm the workflow provisions the official GitHub CLI from `cli/cli` and verifies `gh skill --help` before package validation or publishing.
 7. Test install in a clean repo using the published tag.
 8. Confirm generated report artifacts are created, including `update-status.json`.
 9. Test the documented one-skill update command; do not use `gh skill update --all` for release validation.
