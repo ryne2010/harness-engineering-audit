@@ -15,8 +15,9 @@ After the required main-branch workflow succeeds, the release workflow:
 1. Derives the release train from skill/project metadata.
 2. Finds the latest matching `vX.Y.x` tag.
 3. Checks release-relevant changes from that tag to the workflow head SHA.
-4. Stamps `release.json` in the source skill and plugin mirror copy.
-5. Runs package validation and publishes the next patch tag.
+4. Runs the canonical `make validate` target.
+5. Stamps `release.json` in the source skill and plugin mirror copy.
+6. Rechecks mirror parity, validates the package, and publishes the next patch tag.
 
 This keeps patch releases moving without manually editing the workflow for every
 patch and prevents a multi-commit push from being skipped just because the final
@@ -25,6 +26,14 @@ commit was not release-relevant.
 The workflow delegates release decisions to `scripts/release_skill_workflow.py`.
 `tests/smoke/run_release_workflow_smoke.py` creates temporary git histories with
 tags and verifies the same helper used by GitHub Actions.
+
+Release validation should not run `harness-engineering-audit` against this source
+repo as its own quality signal. Use the fixture-based smoke tests in
+`make validate`, then use `gh skill publish --dry-run` for package validation.
+
+The hosted release job expects the runner's GitHub CLI to already support
+`gh skill`. If it does not, the workflow fails with a clear precondition error
+instead of installing a latest CLI package at runtime.
 
 ## Manual fallback
 
@@ -60,3 +69,5 @@ python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py .
 - Keep release immutability enabled in GitHub settings.
 - Keep tag protection/versioning rules enabled for `v*` tags.
 - Keep code scanning enabled because the skill ships Python scripts.
+- Keep `gh skill` available on release runners; do not dynamically install the
+  latest GitHub CLI inside the release job.

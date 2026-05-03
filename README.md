@@ -231,9 +231,14 @@ python3 tests/smoke/run_release_workflow_smoke.py
 Normal releases are published by `.github/workflows/release-skill.yml` after the
 required main-branch workflow succeeds. The release workflow derives the
 `vX.Y` train from skill/project metadata, checks release-relevant changes since
-the latest matching tag, stamps package-local `release.json`, validates the
-package, then publishes the next patch tag. Release decision logic lives in
-`scripts/release_skill_workflow.py` and is covered by git-history smoke tests.
+the latest matching tag, runs `make validate`, stamps package-local
+`release.json`, validates mirror parity and the package, then publishes the next
+patch tag. Release decision logic lives in `scripts/release_skill_workflow.py`
+and is covered by git-history smoke tests.
+
+Release validation uses smoke fixtures and package dry-run validation. It should
+not run `harness-engineering-audit` against this source repo as its own quality
+signal.
 
 Local validation:
 

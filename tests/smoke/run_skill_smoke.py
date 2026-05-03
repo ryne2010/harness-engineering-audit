@@ -17,6 +17,7 @@ LANE_CATALOG = REPO_ROOT / "skills" / "harness-engineering-audit" / "assets" / "
 SKILL_SCRIPTS = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-skill.yml"
 VALIDATE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
+MAKEFILE = REPO_ROOT / "Makefile"
 
 
 def assert_validate_workflow_uses_canonical_target() -> bool:
@@ -53,7 +54,9 @@ def assert_release_workflow_hardening() -> bool:
         "scripts/release_skill_workflow.py check-changes",
         "scripts/release_skill_workflow.py next-tag",
         "scripts/release_skill_workflow.py stamp-release",
-        "tests/smoke/run_release_workflow_smoke.py",
+        "gh skill --help",
+        "make validate",
+        "make mirror-parity",
     ]
     missing = [item for item in required if item not in text]
     if missing:
@@ -64,10 +67,30 @@ def assert_release_workflow_hardening() -> bool:
         'git diff --name-only "${head_sha}^" "${head_sha}"',
         "python3 - <<'PY' >> \"$GITHUB_OUTPUT\"",
         "Path(\"skills/harness-engineering-audit/release.json\")",
+        "security-events: write",
+        "curl -fsSL https://api.github.com/repos/cli/cli/releases/latest",
+        "apt-get install",
+        "/tmp/gh.deb",
+        "python3 -m py_compile skills/harness-engineering-audit/scripts/*.py",
+        "python3 tests/check_skill_mirror.py",
+        "python3 tests/smoke/run_skill_smoke.py",
+        "python3 tests/smoke/run_release_workflow_smoke.py",
+        "run_audit.py .",
+        "run_audit.py . --",
     ]
     present = [item for item in forbidden if item in text]
     if present:
         print(f"release workflow still contains stale release logic: {present}", file=sys.stderr)
+        return False
+    if "actions: read" in text:
+        print("release workflow should keep permissions to the minimum publish surface", file=sys.stderr)
+        return False
+    makefile_text = MAKEFILE.read_text(encoding="utf-8") if MAKEFILE.exists() else ""
+    if "tests/smoke/run_release_workflow_smoke.py" not in makefile_text:
+        print("canonical validation should include release workflow smoke coverage", file=sys.stderr)
+        return False
+    if "run_audit.py ." in makefile_text or "run_audit.py . --" in makefile_text:
+        print("canonical validation should not self-audit this skill repo", file=sys.stderr)
         return False
     return True
 

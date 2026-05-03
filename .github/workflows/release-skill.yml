@@ -8,8 +8,6 @@ on:
 
 permissions:
   contents: write
-  actions: read
-  security-events: write
 
 concurrency:
   group: release-skill-main
@@ -59,67 +57,22 @@ jobs:
             --base-minor "$base_minor" \
             --github-output "$GITHUB_OUTPUT"
 
-      - name: Ensure GitHub CLI has gh skill support
+      - name: Verify GitHub CLI has gh skill support
         if: steps.changes.outputs.release_relevant == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Preinstalled gh:"
-          gh --version || true
-
-          if gh skill --help >/dev/null 2>&1; then
-            echo "gh skill is already available."
-            exit 0
+          gh --version
+          if ! gh skill --help >/dev/null 2>&1; then
+            echo "::error::GitHub CLI on this runner does not provide 'gh skill'. Use a runner image with gh skill support or publish manually from an environment that has it."
+            exit 1
           fi
 
-          echo "gh skill is missing; installing latest GitHub CLI release..."
-
-          ARCH="$(dpkg --print-architecture)"
-          case "$ARCH" in
-            amd64) GH_ARCH="amd64" ;;
-            arm64) GH_ARCH="arm64" ;;
-            *)
-              echo "Unsupported architecture: $ARCH" >&2
-              exit 1
-              ;;
-          esac
-
-          GH_VERSION="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["tag_name"].lstrip("v"))')"
-
-          echo "Installing gh ${GH_VERSION} for ${GH_ARCH}"
-
-          curl -fsSL \
-            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.deb" \
-            -o /tmp/gh.deb
-
-          sudo apt-get update
-          sudo apt-get install -y /tmp/gh.deb
-
-          echo "Installed gh:"
-          gh --version
-          gh skill --help
-
-      - name: Validate Python scripts
+      - name: Run canonical validation
         if: steps.changes.outputs.release_relevant == 'true'
         run: |
-          python3 -m py_compile skills/harness-engineering-audit/scripts/*.py
-          python3 -m py_compile scripts/release_skill_workflow.py
-          python3 -m py_compile tests/smoke/run_skill_smoke.py
-          python3 -m py_compile tests/smoke/run_release_workflow_smoke.py
-          python3 -m py_compile tests/check_skill_mirror.py
-
-      - name: Validate plugin mirror parity
-        if: steps.changes.outputs.release_relevant == 'true'
-        run: |
-          python3 tests/check_skill_mirror.py
-
-      - name: Run smoke test
-        if: steps.changes.outputs.release_relevant == 'true'
-        run: |
-          python3 tests/smoke/run_skill_smoke.py
-          python3 tests/smoke/run_release_workflow_smoke.py
+          make validate
 
       - name: Compute next release tag
         if: steps.changes.outputs.release_relevant == 'true'
@@ -140,7 +93,7 @@ jobs:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
           python3 scripts/release_skill_workflow.py stamp-release --tag "$RELEASE_TAG"
-          python3 tests/check_skill_mirror.py
+          make mirror-parity
 
       - name: Validate skill package
         if: steps.changes.outputs.release_relevant == 'true'
