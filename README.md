@@ -220,16 +220,31 @@ make validate
 Equivalent commands:
 
 ```bash
-python3 -m py_compile skills/harness-engineering-audit/scripts/*.py tests/smoke/run_skill_smoke.py tests/check_skill_mirror.py
+python3 -m py_compile skills/harness-engineering-audit/scripts/*.py scripts/release_skill_workflow.py tests/smoke/run_skill_smoke.py tests/smoke/run_release_workflow_smoke.py tests/check_skill_mirror.py
 python3 tests/check_skill_mirror.py
 python3 tests/smoke/run_skill_smoke.py
+python3 tests/smoke/run_release_workflow_smoke.py
 ```
 
 ## Publish
 
+Normal releases are published by `.github/workflows/release-skill.yml` after the
+required main-branch workflow succeeds. The release workflow derives the
+`vX.Y` train from skill/project metadata, checks release-relevant changes since
+the latest matching tag, stamps package-local `release.json`, validates the
+package, then publishes the next patch tag. Release decision logic lives in
+`scripts/release_skill_workflow.py` and is covered by git-history smoke tests.
+
+Local validation:
+
 ```bash
 gh skill publish --dry-run
-gh skill publish --tag v0.2.0
+```
+
+Manual publish should be used only as an intentional fallback:
+
+```bash
+gh skill publish --tag vX.Y.Z
 ```
 
 Full publishing steps are in [`docs/PUBLISHING.md`](docs/PUBLISHING.md).

@@ -20,7 +20,9 @@ jobs:
     name: Validate and publish skill release
     if: >-
       ${{ github.event.workflow_run.conclusion == 'success' &&
-          github.event.workflow_run.event == 'workflow_run' }}
+          github.event.workflow_run.event == 'workflow_run' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
 
     steps:
@@ -28,12 +30,19 @@ jobs:
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: Resolve release train
+        id: release_base
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release_skill_workflow.py resolve-base --github-output "$GITHUB_OUTPUT"
 
       - name: Check release-relevant changes
         id: changes
@@ -42,21 +51,13 @@ jobs:
           set -euo pipefail
 
           head_sha="${{ github.event.workflow_run.head_sha }}"
+          base_minor="${{ steps.release_base.outputs.base_minor }}"
 
-          if git rev-parse "${head_sha}^" >/dev/null 2>&1; then
-            changed_files="$(git diff --name-only "${head_sha}^" "${head_sha}")"
-          else
-            changed_files="$(git ls-tree -r --name-only "${head_sha}")"
-          fi
-
-          printf 'Changed files considered for release:\n%s\n' "${changed_files}"
-
-          if printf '%s\n' "${changed_files}" | grep -Eq '^(skills/|plugins/|\.agents/plugins/|docs/|README\.md$|LICENSE$|CHANGELOG\.md$|pyproject\.toml$|tests/|\.github/workflows/release-skill\.yml$|\.github/workflows/codeql\.yml$|\.github/workflows/validate\.yml$)'; then
-            echo "release_relevant=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No release-relevant changes detected; skipping publish."
-            echo "release_relevant=false" >> "$GITHUB_OUTPUT"
-          fi
+          git fetch --tags --force
+          python3 scripts/release_skill_workflow.py check-changes \
+            --head-sha "$head_sha" \
+            --base-minor "$base_minor" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Ensure GitHub CLI has gh skill support
         if: steps.changes.outputs.release_relevant == 'true'
@@ -104,7 +105,9 @@ jobs:
         if: steps.changes.outputs.release_relevant == 'true'
         run: |
           python3 -m py_compile skills/harness-engineering-audit/scripts/*.py
+          python3 -m py_compile scripts/release_skill_workflow.py
           python3 -m py_compile tests/smoke/run_skill_smoke.py
+          python3 -m py_compile tests/smoke/run_release_workflow_smoke.py
           python3 -m py_compile tests/check_skill_mirror.py
 
       - name: Validate plugin mirror parity
@@ -116,6 +119,7 @@ jobs:
         if: steps.changes.outputs.release_relevant == 'true'
         run: |
           python3 tests/smoke/run_skill_smoke.py
+          python3 tests/smoke/run_release_workflow_smoke.py
 
       - name: Compute next release tag
         if: steps.changes.outputs.release_relevant == 'true'
@@ -126,46 +130,16 @@ jobs:
 
           git fetch --tags --force
 
-          BASE_MINOR="v0.2"
-          latest="$(git tag -l "${BASE_MINOR}.*" --sort=-v:refname | head -n 1 || true)"
-
-          if [ -z "$latest" ]; then
-            next="${BASE_MINOR}.0"
-          else
-            patch="${latest##*.}"
-            if ! [[ "$patch" =~ ^[0-9]+$ ]]; then
-              echo "Latest tag $latest does not end in a numeric patch version." >&2
-              exit 1
-            fi
-            next="${BASE_MINOR}.$((patch + 1))"
-          fi
-
-          echo "tag=$next" >> "$GITHUB_OUTPUT"
-          echo "Next release tag: $next"
+          python3 scripts/release_skill_workflow.py next-tag \
+            --base-minor "${{ steps.release_base.outputs.base_minor }}" \
+            --github-output "$GITHUB_OUTPUT"
 
       - name: Stamp release metadata
         if: steps.changes.outputs.release_relevant == 'true'
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          python3 - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          tag = os.environ["RELEASE_TAG"]
-          version = tag.lstrip("v")
-          payload = {
-              "schema": "harness-engineering-audit.release.v1",
-              "version": version,
-              "tag": tag,
-          }
-          for path in [
-              Path("skills/harness-engineering-audit/release.json"),
-              Path("plugins/harness-engineering-audit/skills/harness-engineering-audit/release.json"),
-          ]:
-              path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-          PY
+          python3 scripts/release_skill_workflow.py stamp-release --tag "$RELEASE_TAG"
           python3 tests/check_skill_mirror.py
 
       - name: Validate skill package

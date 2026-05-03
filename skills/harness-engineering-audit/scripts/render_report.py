@@ -897,8 +897,15 @@ def render_main_report(
     ci = inventory.get("ci", {})
     vocabulary = inventory.get("vocabulary_readiness", {})
     doc_gardening = inventory.get("doc_gardening_readiness", {})
-    marker_counts = inventory.get("markers", {}).get("counts", {})
-    total_markers = sum(int(v) for v in marker_counts.values()) if marker_counts else 0
+    markers = inventory.get("markers", {})
+    marker_counts = markers.get("counts", {})
+    marker_affected_files = markers.get("affected_files", [])
+    if "affected_files" in markers:
+        marker_metric_label = "affected files"
+        total_markers = len(marker_affected_files)
+    else:
+        marker_metric_label = "raw hits"
+        total_markers = sum(int(v) for v in marker_counts.values()) if marker_counts else 0
     next_step = render_next_step_json(paths, inventory, scorecard)
     next_decision = next_step["decision"]
     next_stage = default_stage_entry(next_step)
@@ -949,7 +956,7 @@ Mode: `{mode}`.
 - OMX contexts: {len(omx.get('contexts', []))}
 - OMX plans: {len(omx.get('plans', []))}
 - Generated/report artifact candidate dirs: {len(inventory.get('generated_artifacts', {}).get('candidate_dirs', []))}
-- Scaffold/legacy marker hits: {total_markers}
+- Scaffold/legacy marker {marker_metric_label}: {total_markers}
 
 {render_readiness_registry_summary(scorecard)}
 

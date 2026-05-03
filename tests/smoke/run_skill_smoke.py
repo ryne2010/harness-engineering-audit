@@ -15,6 +15,61 @@ RUN_AUDIT = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts" / "ru
 CHECK_UPDATE = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts" / "check_update.py"
 LANE_CATALOG = REPO_ROOT / "skills" / "harness-engineering-audit" / "assets" / "lane-packs.json"
 SKILL_SCRIPTS = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts"
+RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-skill.yml"
+VALIDATE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
+
+
+def assert_validate_workflow_uses_canonical_target() -> bool:
+    if not VALIDATE_WORKFLOW.exists():
+        print(f"missing validate workflow: {VALIDATE_WORKFLOW}", file=sys.stderr)
+        return False
+    text = VALIDATE_WORKFLOW.read_text(encoding="utf-8")
+    if "make validate" not in text:
+        print("validate workflow should run canonical `make validate` target", file=sys.stderr)
+        return False
+    stale_commands = [
+        "python3 tests/smoke/run_skill_smoke.py",
+        "python3 tests/check_skill_mirror.py",
+        "python3 -m py_compile skills/harness-engineering-audit/scripts/*.py",
+    ]
+    present = [command for command in stale_commands if command in text]
+    if present:
+        print(f"validate workflow should not duplicate stale validation commands: {present}", file=sys.stderr)
+        return False
+    return True
+
+
+def assert_release_workflow_hardening() -> bool:
+    if not RELEASE_WORKFLOW.exists():
+        print(f"missing release workflow: {RELEASE_WORKFLOW}", file=sys.stderr)
+        return False
+    text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+    required = [
+        "fetch-depth: 0",
+        "id: release_base",
+        "github.event.workflow_run.head_branch == 'main'",
+        "github.event.workflow_run.head_repository.full_name == github.repository",
+        "scripts/release_skill_workflow.py resolve-base",
+        "scripts/release_skill_workflow.py check-changes",
+        "scripts/release_skill_workflow.py next-tag",
+        "scripts/release_skill_workflow.py stamp-release",
+        "tests/smoke/run_release_workflow_smoke.py",
+    ]
+    missing = [item for item in required if item not in text]
+    if missing:
+        print(f"release workflow missing hardening markers: {missing}", file=sys.stderr)
+        return False
+    forbidden = [
+        'BASE_MINOR="v0.2"',
+        'git diff --name-only "${head_sha}^" "${head_sha}"',
+        "python3 - <<'PY' >> \"$GITHUB_OUTPUT\"",
+        "Path(\"skills/harness-engineering-audit/release.json\")",
+    ]
+    present = [item for item in forbidden if item in text]
+    if present:
+        print(f"release workflow still contains stale release logic: {present}", file=sys.stderr)
+        return False
+    return True
 
 
 def assert_recommendation_helper_edges() -> bool:
@@ -359,6 +414,10 @@ def main() -> int:
         return 1
     if not assert_update_patch_availability():
         return 1
+    if not assert_validate_workflow_uses_canonical_target():
+        return 1
+    if not assert_release_workflow_hardening():
+        return 1
 
     with tempfile.TemporaryDirectory(prefix="harness-audit-smoke-") as td:
         repo = Path(td) / "repo"
@@ -693,6 +752,15 @@ def main() -> int:
             print(f"scorecard should recommend missing frontend-ui-ux lane: {score_lane_registry}", file=sys.stderr)
             return 1
         report_text = (out / "report.md").read_text(encoding="utf-8")
+        markers = inventory.get("markers", {})
+        affected_marker_files = len(markers.get("affected_files", []))
+        raw_marker_hits = sum(int(v) for v in (markers.get("counts") or {}).values())
+        if f"Scaffold/legacy marker affected files: {affected_marker_files}" not in report_text:
+            print("report should show denoised scaffold marker affected-file count", file=sys.stderr)
+            return 1
+        if raw_marker_hits != affected_marker_files and f"Scaffold/legacy marker hits: {raw_marker_hits}" in report_text:
+            print("report should not expose raw scaffold marker hit count", file=sys.stderr)
+            return 1
         if "Vocabulary / Domain Language Control" not in report_text:
             print("report missing Vocabulary / Domain Language Control section", file=sys.stderr)
             return 1
