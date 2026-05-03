@@ -73,6 +73,13 @@ def inventory_tools(repo: str | Path, inventory: Dict[str, Any], stack_inventory
                 "evidence_paths": [manifest.get("path")],
                 "scripts": sorted((manifest.get("scripts") or {}).keys()),
             })
+        elif manifest.get("scripts"):
+            installed_tools.append({
+                "id": f"{str(manifest.get('name', 'manifest')).lower()}-targets",
+                "kind": "command-registry",
+                "evidence_paths": [manifest.get("path")],
+                "scripts": sorted((manifest.get("scripts") or {}).keys()),
+            })
         elif manifest.get("path"):
             installed_tools.append({"id": str(manifest.get("name")), "kind": "manifest", "evidence_paths": [manifest.get("path")]})
 

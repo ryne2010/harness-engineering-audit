@@ -21,11 +21,14 @@ IGNORE_DIRS = {
 
 AUDIT_SIGNAL_EXCLUDED_PREFIXES = {
     (".codex", "reports"),
+    (".omx", "cache"),
     (".omx", "state"),
     (".omx", "logs"),
     (".agents", "skills", "harness-engineering-audit"),
     (".codex", "skills", "harness-engineering-audit"),
     ("docs", "harness"),
+    ("plugins", "harness-engineering-audit", "skills", "harness-engineering-audit"),
+    ("skills", "harness-engineering-audit", "assets"),
 }
 
 

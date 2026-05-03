@@ -181,6 +181,24 @@ def normalize_version(value: Optional[str]) -> Optional[str]:
     return value.strip().lstrip("v")
 
 
+def version_parts(value: Optional[str]) -> tuple[int, ...]:
+    normalized = normalize_version(value)
+    if not normalized:
+        return ()
+    parts = []
+    for raw in normalized.split("."):
+        if not raw.isdigit():
+            break
+        parts.append(int(raw))
+    return tuple(parts)
+
+
+def same_release_line(installed: Optional[str], latest: Optional[str]) -> bool:
+    installed_parts = version_parts(installed)
+    latest_parts = version_parts(latest)
+    return len(installed_parts) >= 2 and len(latest_parts) >= 2 and installed_parts[:2] == latest_parts[:2]
+
+
 def infer_scope(repo_or_skill: Path) -> tuple[Optional[str], str]:
     resolved = Path(__file__).resolve()
     text = str(resolved)
@@ -217,6 +235,7 @@ def base_result(repo_or_skill: Path) -> Dict[str, Any]:
             "Normal audit runs never self-update silently.",
             "Avoid `gh skill update --all` for this skill because system/manual skills may lack GitHub metadata.",
             "Project-scoped installs should generally be updated intentionally through a repository PR.",
+            "Patch tags within the same major/minor release line are treated as the same packaged skill version unless local version metadata changes.",
         ],
         "messages": [],
         "errors": [],
@@ -254,8 +273,16 @@ def check_update(repo_or_skill: Path) -> Dict[str, Any]:
         result["messages"].append("Installed version could not be detected locally.")
     elif installed == latest:
         result["status"] = "current"
+        result["version_match_strategy"] = "exact"
+    elif same_release_line(installed, latest):
+        result["status"] = "current"
+        result["version_match_strategy"] = "same-major-minor-release-line"
+        result["messages"].append(
+            f"Installed version {installed} is on the same release line as latest tag {latest}."
+        )
     else:
         result["status"] = "available"
+        result["version_match_strategy"] = "different-release-line"
     return result
 
 

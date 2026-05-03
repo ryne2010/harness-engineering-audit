@@ -131,6 +131,73 @@ def assert_no_recommend_tools_skips_catalog() -> bool:
     return True
 
 
+def assert_makefile_validation_discovery() -> bool:
+    if str(SKILL_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SKILL_SCRIPTS))
+    from harness_inventory import collect_inventory  # noqa: PLC0415
+    from harness_score import score_inventory  # noqa: PLC0415
+    from tool_inventory import inventory_tools  # noqa: PLC0415
+
+    with tempfile.TemporaryDirectory(prefix="harness-audit-makefile-") as td:
+        repo = Path(td)
+        (repo / "Makefile").write_text(
+            "PYTHON ?= python3\n\n"
+            ".PHONY: validate smoke py-compile\n\n"
+            "validate: py-compile smoke\n\n"
+            "py-compile:\n"
+            "\t$(PYTHON) -m py_compile scripts/*.py\n\n"
+            "smoke:\n"
+            "\t$(PYTHON) tests/smoke.py\n",
+            encoding="utf-8",
+        )
+        inventory = collect_inventory(repo)
+        makefile = next((item for item in inventory.get("manifests", []) if item.get("name") == "Makefile"), {})
+        scripts = makefile.get("scripts") or {}
+        if not {"validate", "py-compile", "smoke"} <= set(scripts):
+            print(f"Makefile validation targets were not parsed as scripts: {makefile}", file=sys.stderr)
+            return False
+        score = score_inventory(inventory)
+        validation_dim = next((d for d in score.get("dimensions", []) if d.get("name") == "Validation Truth"), {})
+        if validation_dim.get("score", 0) < 4 or any("No validation scripts found" in gap for gap in validation_dim.get("gaps", [])):
+            print(f"Makefile validation targets did not score as validation scripts: {validation_dim}", file=sys.stderr)
+            return False
+        tools = inventory_tools(repo, inventory, {"stack_tags": []})
+        if any(gap.get("id") == "validation-command-discovery" for gap in tools.get("capability_gaps", [])):
+            print(f"Makefile validation targets should satisfy tool inventory validation discovery: {tools}", file=sys.stderr)
+            return False
+    return True
+
+
+def assert_update_release_line_matching() -> bool:
+    if str(SKILL_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SKILL_SCRIPTS))
+    import check_update  # noqa: PLC0415
+
+    original_which_gh = check_update.which_gh
+    original_gh_skill_available = check_update.gh_skill_available
+    original_latest_release_tag = check_update.latest_release_tag
+
+    try:
+        check_update.which_gh = lambda: "/usr/bin/gh"
+        check_update.gh_skill_available = lambda: (True, "gh skill help")
+        check_update.latest_release_tag = lambda: ("v0.2.37", None)
+        same_line = check_update.check_update(REPO_ROOT)
+        if same_line.get("status") != "current" or same_line.get("version_match_strategy") != "same-major-minor-release-line":
+            print(f"same release line should be current: {same_line}", file=sys.stderr)
+            return False
+
+        check_update.latest_release_tag = lambda: ("v0.3.0", None)
+        next_line = check_update.check_update(REPO_ROOT)
+        if next_line.get("status") != "available" or next_line.get("version_match_strategy") != "different-release-line":
+            print(f"different release line should be available: {next_line}", file=sys.stderr)
+            return False
+    finally:
+        check_update.which_gh = original_which_gh
+        check_update.gh_skill_available = original_gh_skill_available
+        check_update.latest_release_tag = original_latest_release_tag
+    return True
+
+
 def assert_recommendation_contract(score: dict, label: str) -> bool:
     recs = score.get("recommendations", {})
     buckets = [
@@ -221,6 +288,10 @@ def main() -> int:
     if not assert_tool_catalog_loader():
         return 1
     if not assert_no_recommend_tools_skips_catalog():
+        return 1
+    if not assert_makefile_validation_discovery():
+        return 1
+    if not assert_update_release_line_matching():
         return 1
 
     with tempfile.TemporaryDirectory(prefix="harness-audit-smoke-") as td:
@@ -984,6 +1055,47 @@ def main() -> int:
             return 1
         if self_noise_upgrades.get("recommendations") or self_noise_upgrades.get("web_verification_queue", {}).get("entries"):
             print(f"--no-recommend-tools should not emit tool work: {self_noise_upgrades}", file=sys.stderr)
+            return 1
+
+        source_noise = Path(td) / "source-noise"
+        source_noise.mkdir()
+        (source_noise / ".omx" / "cache").mkdir(parents=True)
+        (source_noise / ".omx" / "cache" / "codebase-map.json").write_text(
+            json.dumps({"notes": "worker queue cache performance benchmark"}),
+            encoding="utf-8",
+        )
+        (source_noise / "skills" / "harness-engineering-audit" / "assets" / "templates").mkdir(parents=True)
+        (source_noise / "skills" / "harness-engineering-audit" / "assets" / "templates" / "AGENTS.md").write_text(
+            "# Template AGENTS\n\nValidation, Symphony, doc gardening, AI/ML, Terraform, security.\n",
+            encoding="utf-8",
+        )
+        (source_noise / "plugins" / "harness-engineering-audit" / "skills" / "harness-engineering-audit" / "assets" / "templates" / "agents").mkdir(parents=True)
+        (source_noise / "plugins" / "harness-engineering-audit" / "skills" / "harness-engineering-audit" / "assets" / "templates" / "agents" / "harness-ai-ml-cv.toml").write_text(
+            "name = \"harness-ai-ml-cv\"\n# Terraform performance security worker queue inference training\n",
+            encoding="utf-8",
+        )
+        source_noise_result = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(source_noise), "--mode", "audit", "--no-check-update", "--no-recommend-tools"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if source_noise_result.returncode != 0:
+            print(source_noise_result.stdout)
+            print(source_noise_result.stderr, file=sys.stderr)
+            return source_noise_result.returncode
+        source_noise_out = source_noise / ".codex" / "reports" / "harness-engineering-audit"
+        source_noise_inventory = json.loads((source_noise_out / "inventory.json").read_text(encoding="utf-8"))
+        if source_noise_inventory.get("file_count_scanned") != 0 or source_noise_inventory.get("instruction_files"):
+            print(f"audit-owned source templates/cache should not be scanned: {source_noise_inventory}", file=sys.stderr)
+            return 1
+        if source_noise_inventory.get("readiness_registry", {}).get("readiness_count") != 0:
+            print(f"audit-owned source templates/cache should not satisfy readiness: {source_noise_inventory}", file=sys.stderr)
+            return 1
+        source_noise_stack = json.loads((source_noise_out / "stack-inventory.json").read_text(encoding="utf-8"))
+        if source_noise_stack.get("stack_tags"):
+            print(f"audit-owned source templates/cache should not create stack tags: {source_noise_stack}", file=sys.stderr)
             return 1
 
         present_security = Path(td) / "present-security"

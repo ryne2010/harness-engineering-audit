@@ -20,10 +20,13 @@ IGNORE_DIRS = {
 
 AUDIT_SIGNAL_EXCLUDED_PREFIXES = {
     (".codex", "reports"),
+    (".omx", "cache"),
     (".omx", "state"),
     (".omx", "logs"),
     (".agents", "skills", "harness-engineering-audit"),
     (".codex", "skills", "harness-engineering-audit"),
+    ("plugins", "harness-engineering-audit", "skills", "harness-engineering-audit"),
+    ("skills", "harness-engineering-audit", "assets"),
 }
 
 TEXT_EXTS = {
@@ -145,6 +148,20 @@ def parse_package_scripts(path: Path) -> Dict[str, str]:
     return {}
 
 
+def parse_makefile_targets(path: Path) -> Dict[str, str]:
+    targets: Dict[str, str] = {}
+    target_pattern = re.compile(r"^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?:\s|$)")
+    for raw in (read_text(path) or "").splitlines():
+        if raw.startswith(("\t", " ")):
+            continue
+        match = target_pattern.match(raw)
+        if not match:
+            continue
+        target = match.group(1)
+        targets[target] = f"make {target}"
+    return targets
+
+
 def find_manifests(root: Path) -> List[Dict[str, Any]]:
     manifests: List[Dict[str, Any]] = []
     for path in iter_files(root):
@@ -154,6 +171,11 @@ def find_manifests(root: Path) -> List[Dict[str, Any]]:
                 scripts = parse_package_scripts(path)
                 item["scripts"] = scripts
                 item["validation_scripts"] = sorted([s for s in scripts if any(k in s.lower() for k in VALIDATION_KEYWORDS)])
+            elif path.name == "Makefile":
+                scripts = parse_makefile_targets(path)
+                item["scripts"] = scripts
+                item["validation_scripts"] = sorted([s for s in scripts if any(k in s.lower() for k in VALIDATION_KEYWORDS)])
+                item["mentions_validation"] = bool(item["validation_scripts"])
             else:
                 text = read_text(path) or ""
                 item["mentions_validation"] = any(k in text.lower() for k in VALIDATION_KEYWORDS)
