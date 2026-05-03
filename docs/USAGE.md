@@ -1,9 +1,17 @@
 # Usage
 
-Run from the target repo root:
+Run from the target repo root.
+
+Project-scoped install:
 
 ```bash
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py .
+```
+
+User-scoped install:
+
+```bash
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py .
 ```
 
 Generated output:
@@ -58,13 +66,13 @@ By default, normal audit runs perform a non-mutating update check for `ryne2010/
 Disable the check when needed:
 
 ```bash
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --no-check-update
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --no-check-update
 ```
 
 Self-update requires explicit intent and updates only this skill:
 
 ```bash
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --self-update --update-scope user
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --self-update --update-scope user
 ```
 
 Do not use `gh skill update --all` for this workflow. Use the explicit one-skill install command instead, and treat project-scoped updates as intentional repo/PR changes.

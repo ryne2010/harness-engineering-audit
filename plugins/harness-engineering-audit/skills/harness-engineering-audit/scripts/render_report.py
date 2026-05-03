@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List
@@ -112,11 +113,17 @@ def build_path_context(inventory: Dict[str, Any], out_dir: Path) -> Dict[str, st
         "source_trust_policy": report_file("source-trust-policy.md"),
         "update_status": report_file("update-status.json"),
         "setup_rollback_manifest": report_file("setup-rollback-manifest.json"),
+        "audit_script": display_path(Path(__file__).resolve().with_name("run_audit.py"), repo_root),
     }
 
 
 def prompt_command(skill: str, prompt_path: str) -> str:
     return f'{skill} "Read {prompt_path} and follow it."'
+
+
+def audit_script_command(paths: Dict[str, str], *args: str) -> str:
+    parts = ["python3", paths["audit_script"], ".", *args]
+    return " ".join(shlex.quote(part) for part in parts)
 
 
 def stage_label(stage: str) -> str:
@@ -371,7 +378,7 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
             "label": "Run safe setup",
             "skill": "python",
             "prompt_file": None,
-            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode safe-setup",
+            "command": audit_script_command(paths, "--mode", "safe-setup"),
             "recommended": default_stage == "safe-setup",
             "description": "Create only missing low-risk harness docs/templates with provenance markers and a rollback manifest.",
         },
@@ -389,7 +396,7 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
             "label": "Run force-ideal-harness",
             "skill": "python",
             "prompt_file": None,
-            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness",
+            "command": audit_script_command(paths, "--mode", "force-ideal-harness"),
             "recommended": False,
             "description": "Explicit mode for stronger low-risk consolidation/replacement. It does not delete files or change CI/config/hooks/security.",
         },
@@ -398,7 +405,7 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
             "label": "Set up repo-local Symphony contracts",
             "skill": "python",
             "prompt_file": None,
-            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local",
+            "command": audit_script_command(paths, "--mode", "symphony-repo-local"),
             "recommended": False,
             "description": "Write repo-local Symphony templates/contracts and inert install/config/rollback handoff text only.",
         },
@@ -407,7 +414,7 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
             "label": "Write Symphony live setup handoff",
             "skill": "python",
             "prompt_file": None,
-            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff",
+            "command": audit_script_command(paths, "--mode", "symphony-live-handoff"),
             "recommended": False,
             "description": "Explicit opt-in handoff text for live runtime setup. It performs no install/config mutation.",
         },
@@ -416,7 +423,7 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
             "label": "Run full orchestration setup",
             "skill": "python",
             "prompt_file": None,
-            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode full-orchestration",
+            "command": audit_script_command(paths, "--mode", "full-orchestration"),
             "recommended": False,
             "description": "Explicit opt-in mode for stronger orchestration contracts and project custom-agent TOML. It is never the default.",
         },
@@ -724,6 +731,7 @@ def default_update_status() -> Dict[str, Any]:
             "Normal audit runs never self-update silently.",
             "Avoid `gh skill update --all` for this skill because system/manual skills may lack GitHub metadata.",
             "Project-scoped installs should generally be updated intentionally through a repository PR.",
+            "Newer patch tags are reported as available because release tags may include material skill changes.",
         ],
     }
 

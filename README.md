@@ -85,17 +85,25 @@ gh skill install ryne2010/harness-engineering-audit skills/harness-engineering-a
 Or use the skill's explicit self-update flag:
 
 ```bash
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --self-update --update-scope user
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --self-update --update-scope user
 ```
 
 After a successful self-update, restart Codex / rerun the audit so the updated files are loaded. Project-scoped installs should generally be updated intentionally through a repo change and PR. Avoid `gh skill update --all` for this use case because it may touch unrelated system/manual skills and may fail on skills without GitHub metadata.
 
 ## Run the audit
 
-From a target repo root after installing the skill:
+From a target repo root after installing the skill.
+
+Project-scoped install:
 
 ```bash
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py .
+```
+
+User-scoped install:
+
+```bash
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py .
 ```
 
 The audit replaces the previous generated report set at:
@@ -138,11 +146,15 @@ Upgrade recommendations are report-only by default: tools are recommended, follo
 Explicit setup modes are available when you want the skill to create low-risk harness infrastructure:
 
 ```bash
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode safe-setup
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode full-orchestration
+AUDIT_SCRIPT=.agents/skills/harness-engineering-audit/scripts/run_audit.py
+# For a user-scoped install, use:
+# AUDIT_SCRIPT=~/.codex/skills/harness-engineering-audit/scripts/run_audit.py
+
+python3 "$AUDIT_SCRIPT" . --mode safe-setup
+python3 "$AUDIT_SCRIPT" . --mode force-ideal-harness
+python3 "$AUDIT_SCRIPT" . --mode symphony-repo-local
+python3 "$AUDIT_SCRIPT" . --mode symphony-live-handoff
+python3 "$AUDIT_SCRIPT" . --mode full-orchestration
 ```
 
 The default `--mode audit` remains report-only. `safe-setup` creates docs-only lane packs under `docs/harness/**` and never creates `.codex/agents`. Stack lanes include activation confidence and recommendation policy fields so weak layout signals can remain advisory instead of inflating missing-lane work. `full-orchestration` is explicit opt-in for project custom-agent TOML and stronger orchestration contracts; it still does not spawn agents or execute live commands. `--force` remains only the output-directory overwrite flag.

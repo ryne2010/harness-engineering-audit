@@ -168,7 +168,7 @@ def assert_makefile_validation_discovery() -> bool:
     return True
 
 
-def assert_update_release_line_matching() -> bool:
+def assert_update_patch_availability() -> bool:
     if str(SKILL_SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SKILL_SCRIPTS))
     import check_update  # noqa: PLC0415
@@ -180,16 +180,22 @@ def assert_update_release_line_matching() -> bool:
     try:
         check_update.which_gh = lambda: "/usr/bin/gh"
         check_update.gh_skill_available = lambda: (True, "gh skill help")
+        check_update.latest_release_tag = lambda: ("v0.2.0", None)
+        exact = check_update.check_update(REPO_ROOT)
+        if exact.get("status") != "current" or exact.get("version_match_strategy") != "exact":
+            print(f"exact installed release should be current: {exact}", file=sys.stderr)
+            return False
+
         check_update.latest_release_tag = lambda: ("v0.2.37", None)
-        same_line = check_update.check_update(REPO_ROOT)
-        if same_line.get("status") != "current" or same_line.get("version_match_strategy") != "same-major-minor-release-line":
-            print(f"same release line should be current: {same_line}", file=sys.stderr)
+        patch_release = check_update.check_update(REPO_ROOT)
+        if patch_release.get("status") != "available" or patch_release.get("version_match_strategy") != "newer-release-available":
+            print(f"newer patch release should be available: {patch_release}", file=sys.stderr)
             return False
 
         check_update.latest_release_tag = lambda: ("v0.3.0", None)
         next_line = check_update.check_update(REPO_ROOT)
-        if next_line.get("status") != "available" or next_line.get("version_match_strategy") != "different-release-line":
-            print(f"different release line should be available: {next_line}", file=sys.stderr)
+        if next_line.get("status") != "available" or next_line.get("version_match_strategy") != "newer-release-available":
+            print(f"newer minor release should be available: {next_line}", file=sys.stderr)
             return False
     finally:
         check_update.which_gh = original_which_gh
@@ -291,7 +297,7 @@ def main() -> int:
         return 1
     if not assert_makefile_validation_discovery():
         return 1
-    if not assert_update_release_line_matching():
+    if not assert_update_patch_availability():
         return 1
 
     with tempfile.TemporaryDirectory(prefix="harness-audit-smoke-") as td:
@@ -694,6 +700,17 @@ def main() -> int:
         full_stage = next(stage for stage in next_step.get("stages", []) if stage.get("stage") == "full-orchestration")
         if full_stage.get("recommended"):
             print("full-orchestration must not be recommended by default", file=sys.stderr)
+            return 1
+        python_stage_commands = [
+            stage.get("command", "")
+            for stage in next_step.get("stages", [])
+            if stage.get("skill") == "python"
+        ]
+        if not python_stage_commands or not all(str(RUN_AUDIT) in command for command in python_stage_commands):
+            print(f"python next-step commands should use running audit script path: {python_stage_commands}", file=sys.stderr)
+            return 1
+        if any(".agents/skills/harness-engineering-audit/scripts/run_audit.py" in command for command in python_stage_commands):
+            print(f"python next-step commands should not hardcode project-scope install path: {python_stage_commands}", file=sys.stderr)
             return 1
         if "symphony-adoption" not in stages:
             print("next-step missing symphony-adoption stage", file=sys.stderr)

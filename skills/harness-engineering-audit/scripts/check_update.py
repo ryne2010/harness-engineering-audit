@@ -193,10 +193,17 @@ def version_parts(value: Optional[str]) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def same_release_line(installed: Optional[str], latest: Optional[str]) -> bool:
+def compare_versions(installed: Optional[str], latest: Optional[str]) -> Optional[int]:
     installed_parts = version_parts(installed)
     latest_parts = version_parts(latest)
-    return len(installed_parts) >= 2 and len(latest_parts) >= 2 and installed_parts[:2] == latest_parts[:2]
+    if not installed_parts or not latest_parts:
+        return None
+    width = max(len(installed_parts), len(latest_parts))
+    installed_padded = installed_parts + (0,) * (width - len(installed_parts))
+    latest_padded = latest_parts + (0,) * (width - len(latest_parts))
+    if installed_padded == latest_padded:
+        return 0
+    return 1 if installed_padded > latest_padded else -1
 
 
 def infer_scope(repo_or_skill: Path) -> tuple[Optional[str], str]:
@@ -235,7 +242,7 @@ def base_result(repo_or_skill: Path) -> Dict[str, Any]:
             "Normal audit runs never self-update silently.",
             "Avoid `gh skill update --all` for this skill because system/manual skills may lack GitHub metadata.",
             "Project-scoped installs should generally be updated intentionally through a repository PR.",
-            "Patch tags within the same major/minor release line are treated as the same packaged skill version unless local version metadata changes.",
+            "Newer patch tags are reported as available because release tags may include material skill changes.",
         ],
         "messages": [],
         "errors": [],
@@ -274,15 +281,21 @@ def check_update(repo_or_skill: Path) -> Dict[str, Any]:
     elif installed == latest:
         result["status"] = "current"
         result["version_match_strategy"] = "exact"
-    elif same_release_line(installed, latest):
-        result["status"] = "current"
-        result["version_match_strategy"] = "same-major-minor-release-line"
-        result["messages"].append(
-            f"Installed version {installed} is on the same release line as latest tag {latest}."
-        )
     else:
-        result["status"] = "available"
-        result["version_match_strategy"] = "different-release-line"
+        comparison = compare_versions(installed, latest)
+        if comparison is not None and comparison >= 0:
+            result["status"] = "current"
+            result["version_match_strategy"] = "numeric-equivalent" if comparison == 0 else "local-newer-than-latest"
+            if comparison > 0:
+                result["messages"].append(
+                    f"Installed version {installed} is newer than latest release tag {latest}."
+                )
+        else:
+            result["status"] = "available"
+            result["version_match_strategy"] = "newer-release-available" if comparison == -1 else "version-mismatch"
+            result["messages"].append(
+                f"Latest release tag {latest} differs from installed version {installed}; update explicitly if you want this skill refreshed."
+            )
     return result
 
 

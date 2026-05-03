@@ -3,8 +3,7 @@
 ## Validate
 
 ```bash
-python3 -m py_compile skills/harness-engineering-audit/scripts/*.py tests/smoke/run_skill_smoke.py
-python3 tests/smoke/run_skill_smoke.py
+make validate
 gh skill publish --dry-run
 ```
 

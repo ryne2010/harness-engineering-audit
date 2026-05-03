@@ -105,6 +105,12 @@ jobs:
         run: |
           python3 -m py_compile skills/harness-engineering-audit/scripts/*.py
           python3 -m py_compile tests/smoke/run_skill_smoke.py
+          python3 -m py_compile tests/check_skill_mirror.py
+
+      - name: Validate plugin mirror parity
+        if: steps.changes.outputs.release_relevant == 'true'
+        run: |
+          python3 tests/check_skill_mirror.py
 
       - name: Run smoke test
         if: steps.changes.outputs.release_relevant == 'true'

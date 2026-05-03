@@ -97,10 +97,18 @@ Always inventory these surfaces when present:
 
 ## Run the audit script
 
-From the repo root, after this skill is installed at `.agents/skills/harness-engineering-audit/`, run:
+From the repo root after installing this skill, run the script from the installed location.
+
+Project-scoped install:
 
 ```bash
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py .
+```
+
+User-scoped install:
+
+```bash
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py .
 ```
 
 The script writes:
@@ -145,7 +153,7 @@ Local Python scripts cannot browse. They therefore write a web verification queu
 Use a custom output directory only when needed:
 
 ```bash
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --out /tmp/harness-engineering-audit
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --out /tmp/harness-engineering-audit
 ```
 
 ## Execution modes
@@ -153,17 +161,21 @@ python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --out /t
 The script default remains report-only:
 
 ```bash
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode audit
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --mode audit
 ```
 
 Additional explicit modes create only low-risk harness artifacts with provenance markers and `setup-rollback-manifest.json`:
 
 ```bash
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode safe-setup
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode full-orchestration
+AUDIT_SCRIPT=~/.codex/skills/harness-engineering-audit/scripts/run_audit.py
+# For a project-scoped install, use:
+# AUDIT_SCRIPT=.agents/skills/harness-engineering-audit/scripts/run_audit.py
+
+python3 "$AUDIT_SCRIPT" . --mode safe-setup
+python3 "$AUDIT_SCRIPT" . --mode force-ideal-harness
+python3 "$AUDIT_SCRIPT" . --mode symphony-repo-local
+python3 "$AUDIT_SCRIPT" . --mode symphony-live-handoff
+python3 "$AUDIT_SCRIPT" . --mode full-orchestration
 ```
 
 `--force` keeps its existing output-overwrite meaning; it is not the force-ideal-harness mode.
@@ -190,13 +202,13 @@ Lane-pack boundaries:
 Normal audit runs check this skill's update status by default and write `update-status.json` plus a `Skill update status` section in `report.md`. This check is report-only and never updates skill files. Disable it with:
 
 ```bash
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --no-check-update
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --no-check-update
 ```
 
 Self-update is explicit and approval-gated. To update this one user-scoped skill installation, run:
 
 ```bash
-python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --self-update --update-scope user
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --self-update --update-scope user
 ```
 
 The self-update path runs only this command and exits immediately after success:
