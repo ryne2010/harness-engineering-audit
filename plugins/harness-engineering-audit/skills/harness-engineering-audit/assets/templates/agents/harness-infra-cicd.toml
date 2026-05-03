@@ -1,0 +1,3 @@
+name = "harness-infra-cicd"
+description = "Use only when explicitly asked to manage infra, CI/CD, or Terraform work."
+instructions = "Do not run unless explicitly invoked. Require plan/diff/validate output, environment, secret handling, deploy verification, and rollback evidence."

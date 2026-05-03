@@ -96,6 +96,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     gen = inv.get("generated_artifacts", {})
     lifecycle = inv.get("lifecycle", {})
     readiness_registry = inv.get("readiness_registry", {})
+    lane_pack_registry = inv.get("lane_pack_registry", {})
 
     # 1 Agent Legibility
     evidence: List[str] = []
@@ -573,6 +574,33 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
             "detail": "Add missing low-risk readiness surfaces and produce a cleanup plan for medium/high-risk degraded harness pieces.",
         })
 
+    lane_recommendations = []
+    lane_payload = lane_pack_registry.get("lanes", {}) if isinstance(lane_pack_registry, dict) else {}
+    for lane_id, lane in sorted(lane_payload.items()):
+        if not isinstance(lane, dict) or lane.get("status") not in {"missing", "recommended"}:
+            continue
+        risk = str(lane.get("risk", "low"))
+        rec = {
+            "category": lane_id,
+            "risk": risk,
+            "auto_approved": risk == "low",
+            "approval": "auto-approved" if risk == "low" else "review-required",
+            "title": f"Add {lane.get('title', lane_id)} lane pack",
+            "detail": (
+                f"Create grounded source-of-truth docs for `{lane_id}`. "
+                "Safe setup writes docs-only lane surfaces; full orchestration is required for custom-agent TOML."
+            ),
+        }
+        lane_recommendations.append(rec)
+        routed = dict(rec)
+        routed["dimension"] = "Lane Packs / Grounded Source Of Truth"
+        if risk == "low":
+            low_risk.append(routed)
+        elif risk == "medium":
+            medium_risk.append(routed)
+        else:
+            high_risk.append(routed)
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "score_schema_version": "2",
@@ -596,6 +624,34 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
                 for key, paths in readiness_categories.items()
             },
             "recommendations": readiness_recommendations,
+        },
+        "lane_pack_registry": {
+            "schema": lane_pack_registry.get("schema", "harness-engineering-audit.lane-pack-registry.v1") if isinstance(lane_pack_registry, dict) else "harness-engineering-audit.lane-pack-registry.v1",
+            "mode_safety": lane_pack_registry.get("mode_safety", {}) if isinstance(lane_pack_registry, dict) else {},
+            "active_lane_ids": lane_pack_registry.get("active_lane_ids", []) if isinstance(lane_pack_registry, dict) else [],
+            "missing_required_lane_ids": lane_pack_registry.get("missing_required_lane_ids", []) if isinstance(lane_pack_registry, dict) else [],
+            "recommended_lane_ids": lane_pack_registry.get("recommended_lane_ids", []) if isinstance(lane_pack_registry, dict) else [],
+            "custom_agent_policy": lane_pack_registry.get("custom_agent_policy", {}) if isinstance(lane_pack_registry, dict) else {},
+            "lanes": {
+                key: {
+                    "title": value.get("title", key),
+                    "status": value.get("status", "missing"),
+                    "activation": value.get("activation", "not_activated"),
+                    "risk": value.get("risk", "low"),
+                    "activation_confidence": value.get("activation_confidence", "none"),
+                    "activation_reason": value.get("activation_reason", ""),
+                    "activation_evidence": value.get("activation_evidence_paths", [])[:10],
+                    "recommendation_policy": value.get("recommendation_policy", "not-applicable"),
+                    "recommendation_reason": value.get("recommendation_reason", ""),
+                    "evidence": value.get("evidence_paths", [])[:10],
+                    "safe_setup_targets": value.get("safe_setup_targets", []),
+                    "full_orchestration_targets": value.get("full_orchestration_targets", []),
+                    "custom_agent_names": value.get("custom_agent_names", []),
+                }
+                for key, value in lane_payload.items()
+                if isinstance(value, dict)
+            },
+            "recommendations": lane_recommendations,
         },
         "dimensions": dims,
         "auto_approval_policy": {

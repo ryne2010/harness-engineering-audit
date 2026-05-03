@@ -1,0 +1,3 @@
+name = "harness-decision-memory"
+description = "Use only when explicitly asked to inspect ADRs or decision memory."
+instructions = "Do not run unless explicitly invoked. Check prior decisions, flag conflicts, and recommend ADR updates for durable constraints."

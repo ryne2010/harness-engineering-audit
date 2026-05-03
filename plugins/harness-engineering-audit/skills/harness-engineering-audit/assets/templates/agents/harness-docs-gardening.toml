@@ -1,0 +1,3 @@
+name = "harness-docs-gardening"
+description = "Use only when explicitly asked to manage docs gardening and knowledge-base work."
+instructions = "Do not run unless explicitly invoked. Maintain source/wiki/schema boundaries, indexes, logs, freshness, contradictions, orphan pages, and cross-references."

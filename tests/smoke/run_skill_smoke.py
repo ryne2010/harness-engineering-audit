@@ -13,6 +13,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_AUDIT = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts" / "run_audit.py"
 CHECK_UPDATE = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts" / "check_update.py"
+LANE_CATALOG = REPO_ROOT / "skills" / "harness-engineering-audit" / "assets" / "lane-packs.json"
+SKILL_SCRIPTS = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts"
 
 
 def main() -> int:
@@ -79,15 +81,53 @@ def main() -> int:
             json.dumps(
                 {
                     "scripts": {"test": "echo ok", "lint": "echo lint"},
-                    "dependencies": {"react": "^19.0.0", "next": "^15.0.0"},
-                    "devDependencies": {"typescript": "^5.0.0", "tailwindcss": "^4.0.0"},
+                    "dependencies": {
+                        "react": "^19.0.0",
+                        "next": "^15.0.0",
+                        "electron": "^33.0.0",
+                        "bullmq": "^5.0.0",
+                    },
+                    "devDependencies": {
+                        "typescript": "^5.0.0",
+                        "tailwindcss": "^4.0.0",
+                        "vite": "^7.0.0",
+                        "@storybook/react": "^9.0.0",
+                    },
                 },
                 indent=2,
             ),
             encoding="utf-8",
         )
+        (repo / "manifest.json").write_text(
+            json.dumps({"manifest_version": 3, "name": "Smoke Extension", "version": "0.0.0"}, indent=2),
+            encoding="utf-8",
+        )
+        (repo / "src" / "components").mkdir(parents=True)
+        (repo / "src" / "components" / "Button.tsx").write_text("export function Button() { return null }\n", encoding="utf-8")
+        (repo / "src" / "auth").mkdir(parents=True)
+        (repo / "src" / "auth" / "permissions.ts").write_text("export const permissions = []\n", encoding="utf-8")
+        (repo / ".storybook").mkdir()
+        (repo / ".storybook" / "main.ts").write_text("export default {}\n", encoding="utf-8")
+        (repo / "electron").mkdir()
+        (repo / "electron" / "main.ts").write_text("export {}\n", encoding="utf-8")
+        (repo / "src-tauri").mkdir()
+        (repo / "src-tauri" / "tauri.conf.json").write_text("{}\n", encoding="utf-8")
+        (repo / "ios" / "Smoke.xcodeproj").mkdir(parents=True)
+        (repo / "ios" / "Smoke.xcodeproj" / "project.pbxproj").write_text("// fixture\n", encoding="utf-8")
+        (repo / "ios" / "WatchKit Extension").mkdir(parents=True)
+        (repo / "ios" / "WatchKit Extension" / "Info.plist").write_text("<plist />\n", encoding="utf-8")
+        (repo / "android" / "app" / "src" / "main").mkdir(parents=True)
+        (repo / "android" / "app" / "src" / "main" / "AndroidManifest.xml").write_text("<manifest />\n", encoding="utf-8")
+        (repo / "workers").mkdir()
+        (repo / "workers" / "queue-worker.ts").write_text("export {}\n", encoding="utf-8")
         (repo / "openapi.yaml").write_text("openapi: 3.1.0\ninfo:\n  title: Smoke\n  version: 0.0.0\npaths: {}\n", encoding="utf-8")
         (repo / "Dockerfile").write_text("FROM node:22-alpine\n", encoding="utf-8")
+        (repo / "infra").mkdir()
+        (repo / "infra" / "main.tf").write_text("terraform { required_version = \">= 1.6.0\" }\n", encoding="utf-8")
+        (repo / "models").mkdir()
+        (repo / "models" / "vision-model.onnx").write_text("placeholder model fixture\n", encoding="utf-8")
+        (repo / "notebooks").mkdir()
+        (repo / "notebooks" / "experiment.ipynb").write_text("{}", encoding="utf-8")
 
 
         fake_bin = Path(td) / "bin"
@@ -244,6 +284,49 @@ def main() -> int:
         if "symphony_readiness" not in inventory:
             print("inventory missing symphony_readiness", file=sys.stderr)
             return 1
+        lane_registry = inventory.get("lane_pack_registry", {})
+        if lane_registry.get("schema") != "harness-engineering-audit.lane-pack-registry.v1":
+            print(f"inventory missing lane_pack_registry: {lane_registry}", file=sys.stderr)
+            return 1
+        mode_safety = lane_registry.get("mode_safety", {})
+        if not (mode_safety.get("audit_report_only") and mode_safety.get("safe_setup_docs_only") and mode_safety.get("custom_agents_full_orchestration_only")):
+            print(f"lane registry missing mode safety flags: {mode_safety}", file=sys.stderr)
+            return 1
+        lanes = lane_registry.get("lanes", {})
+        for lane_id in {"frontend-ui-ux", "infra-cicd-terraform", "ai-ml-cv-data-science"}:
+            if lanes.get(lane_id, {}).get("activation") != "stack_detected":
+                print(f"expected stack-detected lane {lane_id}: {lanes.get(lane_id)}", file=sys.stderr)
+                return 1
+        if "host_matrix" not in lanes.get("frontend-ui-ux", {}) or not lanes["frontend-ui-ux"]["host_matrix"].get("web"):
+            print(f"frontend-ui-ux missing web host matrix: {lanes.get('frontend-ui-ux')}", file=sys.stderr)
+            return 1
+        host_matrix = lanes["frontend-ui-ux"]["host_matrix"]
+        for host in {"web", "desktop", "mobile", "tablet", "watch", "browser_extension"}:
+            if not host_matrix.get(host):
+                print(f"frontend-ui-ux missing {host} host matrix: {host_matrix}", file=sys.stderr)
+                return 1
+        for lane_id in {"frontend-ui-ux", "mobile-native", "desktop-native", "security-trust", "performance-scalability-reliability"}:
+            lane = lanes.get(lane_id, {})
+            if lane.get("status") != "recommended" or lane.get("recommendation_policy") != "recommended":
+                print(f"expected recommended lane policy for {lane_id}: {lane}", file=sys.stderr)
+                return 1
+            if lane.get("activation_confidence") not in {"medium", "high"}:
+                print(f"expected medium/high confidence for {lane_id}: {lane}", file=sys.stderr)
+                return 1
+        score_lane_registry = score.get("lane_pack_registry", {})
+        if score_lane_registry.get("schema") != "harness-engineering-audit.lane-pack-registry.v1":
+            print(f"scorecard missing lane_pack_registry: {score_lane_registry}", file=sys.stderr)
+            return 1
+        score_frontend_lane = score_lane_registry.get("lanes", {}).get("frontend-ui-ux", {})
+        if score_frontend_lane.get("activation_confidence") not in {"medium", "high"}:
+            print(f"scorecard missing lane confidence: {score_frontend_lane}", file=sys.stderr)
+            return 1
+        if score_frontend_lane.get("recommendation_policy") != "recommended":
+            print(f"scorecard missing lane recommendation policy: {score_frontend_lane}", file=sys.stderr)
+            return 1
+        if "frontend-ui-ux" not in score_lane_registry.get("recommended_lane_ids", []):
+            print(f"scorecard should recommend missing frontend-ui-ux lane: {score_lane_registry}", file=sys.stderr)
+            return 1
         report_text = (out / "report.md").read_text(encoding="utf-8")
         if "Vocabulary / Domain Language Control" not in report_text:
             print("report missing Vocabulary / Domain Language Control section", file=sys.stderr)
@@ -253,6 +336,9 @@ def main() -> int:
             return 1
         if "Symphony Orchestration Readiness" not in report_text:
             print("report missing Symphony readiness section", file=sys.stderr)
+            return 1
+        if "## Lane Pack Registry" not in report_text or "frontend-ui-ux" not in report_text or "Confidence" not in report_text:
+            print("report missing lane pack registry section", file=sys.stderr)
             return 1
         if "## Skill update status" not in report_text or "gh skill update --all" not in report_text:
             print("report missing skill update status safety section", file=sys.stderr)
@@ -293,6 +379,13 @@ def main() -> int:
             if stage_name not in stages:
                 print(f"next-step missing {stage_name} stage", file=sys.stderr)
                 return 1
+        if "full-orchestration" not in stages:
+            print("next-step missing full-orchestration stage", file=sys.stderr)
+            return 1
+        full_stage = next(stage for stage in next_step.get("stages", []) if stage.get("stage") == "full-orchestration")
+        if full_stage.get("recommended"):
+            print("full-orchestration must not be recommended by default", file=sys.stderr)
+            return 1
         if "symphony-adoption" not in stages:
             print("next-step missing symphony-adoption stage", file=sys.stderr)
             return 1
@@ -302,7 +395,29 @@ def main() -> int:
 
         stack = json.loads((out / "stack-inventory.json").read_text(encoding="utf-8"))
         stack_tags = {item.get("tag") for item in stack.get("stack_tags", [])}
-        for required_tag in {"python", "node-js-ts", "frontend-web", "openapi", "docker", "codex-ready", "omx-enabled"}:
+        for required_tag in {
+            "python",
+            "node-js-ts",
+            "frontend-web",
+            "openapi",
+            "docker",
+            "codex-ready",
+            "omx-enabled",
+            "browser-extension",
+            "storybook",
+            "vite-app",
+            "mobile-native",
+            "ios",
+            "android",
+            "watchos",
+            "desktop-native",
+            "electron",
+            "tauri",
+            "queue",
+            "cache",
+            "worker-service",
+            "security-sensitive",
+        }:
             if required_tag not in stack_tags:
                 print(f"stack inventory missing {required_tag}: {sorted(stack_tags)}", file=sys.stderr)
                 return 1
@@ -356,6 +471,109 @@ def main() -> int:
             return 1
 
         template_dir = REPO_ROOT / "skills" / "harness-engineering-audit" / "assets" / "templates"
+        if not LANE_CATALOG.exists():
+            print(f"missing lane catalog: {LANE_CATALOG}", file=sys.stderr)
+            return 1
+        lane_catalog = json.loads(LANE_CATALOG.read_text(encoding="utf-8"))
+        if lane_catalog.get("schema") != "harness-engineering-audit.lane-pack-catalog.v1":
+            print(f"unexpected lane catalog schema: {lane_catalog.get('schema')}", file=sys.stderr)
+            return 1
+        built_in_agent_names = set(lane_catalog.get("built_in_agent_names", []))
+        expected_universal_lanes = {
+            "lane-registry",
+            "agent-handoff-protocol",
+            "workflow-library",
+            "contract-boundaries",
+            "runtime-evidence-standards",
+            "change-taxonomy",
+            "decision-memory",
+            "context-budget-architecture",
+            "tool-capability-registry",
+            "drift-staleness-control",
+        }
+        expected_stack_lanes = {
+            "frontend-ui-ux",
+            "backend-api-contracts",
+            "data-persistence",
+            "security-trust",
+            "performance-scalability-reliability",
+            "infra-cicd-terraform",
+            "ai-ml-cv-data-science",
+            "mobile-native",
+            "desktop-native",
+            "cli-devtool",
+            "observability-sre",
+            "docs-gardening-knowledge",
+            "qa-evaluation",
+        }
+        catalog_lanes = {lane.get("id"): lane for lane in lane_catalog.get("lanes", [])}
+        if not expected_universal_lanes <= set(catalog_lanes) or not expected_stack_lanes <= set(catalog_lanes):
+            print(f"lane catalog missing expected lanes: {sorted(set(catalog_lanes))}", file=sys.stderr)
+            return 1
+        custom_agent_names = []
+        for lane_id, lane in catalog_lanes.items():
+            for key in {"id", "activation", "risk", "safe_setup_targets", "full_orchestration_targets", "source_of_truth_expectations", "validation_expectations"}:
+                if key not in lane:
+                    print(f"lane {lane_id} missing {key}", file=sys.stderr)
+                    return 1
+            for target in lane.get("safe_setup_targets", []):
+                if target.get("target", "").startswith(".codex/agents"):
+                    print(f"safe setup target must not create .codex/agents: {lane_id} {target}", file=sys.stderr)
+                    return 1
+                if not (template_dir / target.get("template", "")).exists():
+                    print(f"missing lane safe template: {lane_id} {target}", file=sys.stderr)
+                    return 1
+            for target in lane.get("full_orchestration_targets", []):
+                if not (template_dir / target.get("template", "")).exists():
+                    print(f"missing lane full template: {lane_id} {target}", file=sys.stderr)
+                    return 1
+                if target.get("agent_name"):
+                    custom_agent_names.append(target["agent_name"])
+        if len(custom_agent_names) != len(set(custom_agent_names)) or set(custom_agent_names) & built_in_agent_names:
+            print(f"custom agent names must be unique and non-built-in: {custom_agent_names}", file=sys.stderr)
+            return 1
+        sys.path.insert(0, str(SKILL_SCRIPTS))
+        from lane_packs import build_lane_pack_registry, setup_targets_for_mode, validate_lane_pack_catalog  # noqa: PLC0415
+
+        invalid_catalog = json.loads(json.dumps(lane_catalog))
+        invalid_catalog["lanes"][0]["safe_setup_targets"][0]["target"] = "../AGENTS.md"
+        try:
+            validate_lane_pack_catalog(invalid_catalog)
+        except ValueError:
+            pass
+        else:
+            print("lane catalog validation should reject parent-traversal targets", file=sys.stderr)
+            return 1
+
+        low_confidence_registry = build_lane_pack_registry(
+            repo,
+            inventory,
+            {
+                "stack_tags": [
+                    {
+                        "tag": "security-sensitive",
+                        "confidence": "low",
+                        "evidence_paths": ["src/auth/permissions.ts"],
+                    }
+                ],
+                "profile_groups": {},
+            },
+            lane_catalog,
+        )
+        low_confidence_security = low_confidence_registry.get("lanes", {}).get("security-trust", {})
+        if low_confidence_security.get("status") != "candidate":
+            print(f"low-confidence medium-risk lane should be advisory candidate: {low_confidence_security}", file=sys.stderr)
+            return 1
+        if low_confidence_security.get("recommendation_policy") != "advisory-candidate":
+            print(f"low-confidence medium-risk lane should not be recommended: {low_confidence_security}", file=sys.stderr)
+            return 1
+        if "security-trust" in low_confidence_registry.get("recommended_lane_ids", []):
+            print(f"low-confidence medium-risk lane should not be in recommended ids: {low_confidence_registry}", file=sys.stderr)
+            return 1
+        low_confidence_targets = setup_targets_for_mode(low_confidence_registry, "full-orchestration", lane_catalog)
+        if any(target.get("lane_id") == "security-trust" for target in low_confidence_targets):
+            print(f"advisory candidate lane should not produce setup targets: {low_confidence_targets}", file=sys.stderr)
+            return 1
         required_templates = {
             "AGENTS.md",
             "docs-index.md",
@@ -410,6 +628,60 @@ def main() -> int:
         if (minimal / "AGENTS.md").exists() or (minimal / "docs").exists():
             print("audit mode must not create source harness files", file=sys.stderr)
             return 1
+        if (minimal / ".codex" / "agents").exists():
+            print("audit mode must not create .codex/agents", file=sys.stderr)
+            return 1
+
+        noise = Path(td) / "noise"
+        noise.mkdir()
+        (noise / "AUTHORS.md").write_text("# Authors\n\nProject maintainers.\n", encoding="utf-8")
+        (noise / "app" / "models").mkdir(parents=True)
+        (noise / "app" / "models" / "user.ts").write_text("export interface User {}\n", encoding="utf-8")
+        noise_result = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(noise), "--mode", "audit", "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if noise_result.returncode != 0:
+            print(noise_result.stdout)
+            print(noise_result.stderr, file=sys.stderr)
+            return noise_result.returncode
+        noise_out = noise / ".codex" / "reports" / "harness-engineering-audit"
+        noise_inventory = json.loads((noise_out / "inventory.json").read_text(encoding="utf-8"))
+        noise_registry = noise_inventory.get("lane_pack_registry", {})
+        noise_recommended = set(noise_registry.get("recommended_lane_ids", []))
+        if {"security-trust", "ai-ml-cv-data-science"} & noise_recommended:
+            print(f"substring noise should not recommend security/AI lanes: {noise_registry}", file=sys.stderr)
+            return 1
+        noise_stack = json.loads((noise_out / "stack-inventory.json").read_text(encoding="utf-8"))
+        noise_tags = {item.get("tag") for item in noise_stack.get("stack_tags", [])}
+        if {"security-sensitive", "ai-ml"} & noise_tags:
+            print(f"substring noise should not create security/AI stack tags: {sorted(noise_tags)}", file=sys.stderr)
+            return 1
+
+        present_security = Path(td) / "present-security"
+        present_security.mkdir()
+        (present_security / "SECURITY.md").write_text("# Security\n\nReport permission issues.\n", encoding="utf-8")
+        (present_security / "src" / "auth").mkdir(parents=True)
+        (present_security / "src" / "auth" / "permissions.ts").write_text("export const permissions = []\n", encoding="utf-8")
+        present_result = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(present_security), "--mode", "audit", "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if present_result.returncode != 0:
+            print(present_result.stdout)
+            print(present_result.stderr, file=sys.stderr)
+            return present_result.returncode
+        present_out = present_security / ".codex" / "reports" / "harness-engineering-audit"
+        present_report = (present_out / "report.md").read_text(encoding="utf-8")
+        if "SECURITY.md" not in present_report or "src/auth/permissions.ts" not in present_report:
+            print("present stack lane report should include source and activation evidence", file=sys.stderr)
+            return 1
 
         setup_result = subprocess.run(
             [sys.executable, "-S", str(RUN_AUDIT), str(minimal), "--mode", "safe-setup", "--no-check-update"],
@@ -437,6 +709,16 @@ def main() -> int:
         if not (minimal / "AGENTS.md").exists() or not (minimal / "docs" / "harness" / "task-contract.md").exists():
             print("safe-setup did not create expected harness files", file=sys.stderr)
             return 1
+        if not (minimal / "docs" / "harness" / "lane-packs" / "lane-registry.md").exists():
+            print("safe-setup missing universal lane pack docs", file=sys.stderr)
+            return 1
+        if (minimal / ".codex" / "agents").exists():
+            print("safe-setup must not create .codex/agents", file=sys.stderr)
+            return 1
+        safe_lane_text = (minimal / "docs" / "harness" / "lane-packs" / "lane-registry.md").read_text(encoding="utf-8")
+        if "Generated by harness-engineering-audit" not in safe_lane_text:
+            print("safe lane pack missing provenance marker", file=sys.stderr)
+            return 1
         if "Generated by harness-engineering-audit" not in (minimal / "AGENTS.md").read_text(encoding="utf-8"):
             print("generated AGENTS missing provenance marker", file=sys.stderr)
             return 1
@@ -454,6 +736,9 @@ def main() -> int:
         second_manifest = json.loads(setup_manifest_path.read_text(encoding="utf-8"))
         if second_manifest.get("created"):
             print(f"safe-setup rerun should be idempotent, saw created: {second_manifest}", file=sys.stderr)
+            return 1
+        if (minimal / ".codex" / "agents").exists():
+            print("safe-setup rerun must not create .codex/agents", file=sys.stderr)
             return 1
 
         score_registry_categories = set(minimal_score.get("readiness_registry", {}).get("categories", {}))
@@ -480,6 +765,42 @@ def main() -> int:
             if required_category not in inventory_registry_categories:
                 print(f"inventory readiness registry missing {required_category}: {sorted(inventory_registry_categories)}", file=sys.stderr)
                 return 1
+
+        full_result = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(minimal), "--mode", "full-orchestration", "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if full_result.returncode != 0:
+            print(full_result.stdout)
+            print(full_result.stderr, file=sys.stderr)
+            return full_result.returncode
+        agent_dir = minimal / ".codex" / "agents"
+        if not agent_dir.exists():
+            print("full-orchestration should create .codex/agents", file=sys.stderr)
+            return 1
+        generated_agents = sorted(agent_dir.glob("*.toml"))
+        if not generated_agents:
+            print("full-orchestration missing generated custom-agent TOML", file=sys.stderr)
+            return 1
+        seen_agent_names = set()
+        for agent_file in generated_agents:
+            text = agent_file.read_text(encoding="utf-8")
+            if "Generated by harness-engineering-audit" not in text or "explicitly invoked" not in text:
+                print(f"custom agent missing provenance/explicit invocation language: {agent_file}", file=sys.stderr)
+                return 1
+            name_line = next((line for line in text.splitlines() if line.startswith("name = ")), "")
+            name = name_line.split("=", 1)[1].strip().strip('"') if name_line else ""
+            if not name or name in built_in_agent_names or name in seen_agent_names:
+                print(f"custom agent name invalid: {name} from {agent_file}", file=sys.stderr)
+                return 1
+            seen_agent_names.add(name)
+        full_manifest = json.loads(setup_manifest_path.read_text(encoding="utf-8"))
+        if not any(path.startswith(".codex/agents/") for path in full_manifest.get("created", []) + full_manifest.get("modified", [])):
+            print(f"full-orchestration manifest missing custom-agent files: {full_manifest}", file=sys.stderr)
+            return 1
 
         repo_local_result = subprocess.run(
             [sys.executable, "-S", str(RUN_AUDIT), str(minimal), "--mode", "symphony-repo-local", "--no-check-update"],

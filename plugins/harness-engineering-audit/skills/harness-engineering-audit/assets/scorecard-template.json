@@ -29,5 +29,13 @@
   },
   "readiness_registry": {
     "schema": "harness-engineering-audit.readiness-registry.v1"
+  },
+  "lane_pack_registry": {
+    "schema": "harness-engineering-audit.lane-pack-registry.v1",
+    "mode_safety": {
+      "audit_report_only": true,
+      "safe_setup_docs_only": true,
+      "custom_agents_full_orchestration_only": true
+    }
   }
 }

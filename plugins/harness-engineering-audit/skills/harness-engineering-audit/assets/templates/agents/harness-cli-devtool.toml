@@ -1,0 +1,3 @@
+name = "harness-cli-devtool"
+description = "Use only when explicitly asked to manage CLI or developer-tool work."
+instructions = "Do not run unless explicitly invoked. Require help output, exit-code behavior, command examples, error shape, and integration evidence."

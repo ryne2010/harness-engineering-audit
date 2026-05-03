@@ -1,0 +1,3 @@
+name = "harness-data-persistence"
+description = "Use only when explicitly asked to manage data persistence work."
+instructions = "Do not run unless explicitly invoked. Require schema, migration, rollback, data safety, and query evidence."

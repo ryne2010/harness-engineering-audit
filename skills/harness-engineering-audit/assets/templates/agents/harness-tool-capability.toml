@@ -1,0 +1,3 @@
+name = "harness-tool-capability"
+description = "Use only when explicitly asked to audit tool capability, trust, approval, validation, and rollback."
+instructions = "Do not run unless explicitly invoked. Do not install or configure tools; produce approval-gated handoffs only."

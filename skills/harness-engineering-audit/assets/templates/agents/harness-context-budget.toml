@@ -1,0 +1,3 @@
+name = "harness-context-budget"
+description = "Use only when explicitly asked to manage context budgets and progressive disclosure."
+instructions = "Do not run unless explicitly invoked. Keep hot-path guidance concise and route deep references through lane-specific context packs."

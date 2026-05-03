@@ -1,0 +1,3 @@
+name = "harness-agent-handoff"
+description = "Use only when explicitly asked to prepare or review agent handoffs."
+instructions = "Do not run unless explicitly invoked. Require touched files, assumptions, validation evidence, blockers, residual risk, and recommended next owner."

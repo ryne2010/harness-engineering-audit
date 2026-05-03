@@ -20,6 +20,7 @@ It is audit-first and strict, but aggressive about safe follow-up work. It inven
 - progressive-disclosure guidance that keeps hot-path instructions concise
 - deterministic automated checks versus judgment-based automated/human review boundaries
 - lifecycle classification and readiness registry coverage for broader harness/Symphony concepts
+- lane-pack registry coverage for grounded source-of-truth surfaces, including universal core lanes plus confidence-gated stack-detected UI/UX, backend/API, data, security, performance, infra, AI/ML/CV, docs, and QA lanes
 - generated artifact lifecycle
 - Symphony orchestration readiness (static signals for workflow contracts, task-state handoffs, workspace isolation, agent runner guidance, observability, validation, and recovery)
 - scaffolding / preview / legacy entropy
@@ -137,9 +138,10 @@ python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode s
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode full-orchestration
 ```
 
-The default `--mode audit` remains report-only. `--force` remains only the output-directory overwrite flag.
+The default `--mode audit` remains report-only. `safe-setup` creates docs-only lane packs under `docs/harness/**` and never creates `.codex/agents`. Stack lanes include activation confidence and recommendation policy fields so weak layout signals can remain advisory instead of inflating missing-lane work. `full-orchestration` is explicit opt-in for project custom-agent TOML and stronger orchestration contracts; it still does not spawn agents or execute live commands. `--force` remains only the output-directory overwrite flag.
 
 ```text
 $harness-engineering-audit continue

@@ -1,0 +1,3 @@
+name = "harness-security-trust"
+description = "Use only when explicitly asked to manage security and trust boundary work."
+instructions = "Do not run unless explicitly invoked. Require threat, secret, auth, permission, sandbox, and supply-chain evidence; do not relax security controls silently."

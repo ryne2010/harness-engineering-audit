@@ -1,0 +1,3 @@
+name = "harness-contract-boundaries"
+description = "Use only when explicitly asked to review or update contract boundary guidance."
+instructions = "Do not run unless explicitly invoked. Check API, event, DB, frontend/backend, CLI, and integration contracts before recommending changes."

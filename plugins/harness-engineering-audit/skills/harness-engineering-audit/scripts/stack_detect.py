@@ -8,11 +8,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 SCHEMA = "harness.stack-inventory.v1"
+IGNORE_DIRS = {
+    ".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
+    ".next", ".nuxt", "coverage", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+}
 
 
 def _manifest_paths(inventory: Dict[str, Any]) -> set[str]:
@@ -44,8 +49,46 @@ def _all_paths(inventory: Dict[str, Any]) -> List[str]:
     return sorted(set(paths))
 
 
+def _repo_paths(root: Path, limit: int = 4000) -> List[str]:
+    paths: List[str] = []
+    for path in root.rglob("*"):
+        if len(paths) >= limit:
+            break
+        try:
+            rel = path.relative_to(root)
+        except ValueError:
+            continue
+        if any(part in IGNORE_DIRS for part in rel.parts):
+            continue
+        if path.is_file():
+            paths.append(str(rel))
+    return sorted(set(paths))
+
+
+def _path_tokens(path: str) -> set[str]:
+    tokens: set[str] = set()
+    for part in Path(path).parts:
+        stem = Path(part).stem
+        tokens.update(token for token in re.split(r"[^a-z0-9]+", stem.lower()) if token)
+    return tokens
+
+
+def _has_token(path: str, expected: Iterable[str]) -> bool:
+    return bool(_path_tokens(path) & set(expected))
+
+
 def _package_data(root: Path) -> Dict[str, Any]:
     path = root / "package.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _json_file(root: Path, rel_path: str) -> Dict[str, Any]:
+    path = root / rel_path
     if not path.exists():
         return {}
     try:
@@ -76,7 +119,7 @@ def _add(tags: Dict[str, Dict[str, Any]], tag: str, evidence: Iterable[str], con
 def detect_stack(repo: str | Path, inventory: Dict[str, Any]) -> Dict[str, Any]:
     root = Path(repo).resolve()
     manifests = _manifest_paths(inventory)
-    paths = _all_paths(inventory)
+    paths = sorted(set(_all_paths(inventory) + _repo_paths(root)))
     lower_paths = [p.lower() for p in paths]
     package = _package_data(root)
     deps = _deps(package)
@@ -97,10 +140,34 @@ def detect_stack(repo: str | Path, inventory: Dict[str, Any]) -> Dict[str, Any]:
         _add(tags, "shell-cli", [p for p in paths if p == "Makefile" or p.endswith((".sh", ".bash", ".zsh"))], "medium")
     if any(name in deps for name in ["react", "next", "vue", "svelte", "@angular/core"]):
         _add(tags, "frontend-web", ["package.json"], "high")
+    frontend_layout_paths = [
+        p for p in paths
+        if p.lower().endswith((".tsx", ".jsx", ".vue", ".svelte"))
+        and (
+            p.lower().startswith(("app/", "pages/", "src/app/", "src/pages/", "src/components/", "components/"))
+            or "/components/" in p.lower()
+        )
+    ]
+    if frontend_layout_paths:
+        _add(tags, "frontend-web", frontend_layout_paths, "medium")
     if "react" in deps:
         _add(tags, "react-app", ["package.json"], "high")
     if "next" in deps:
         _add(tags, "nextjs-app", ["package.json"], "high")
+    if "nuxt" in deps or any("nuxt.config" in p for p in lower_paths):
+        _add(tags, "nuxt-app", ["package.json"] + [p for p in paths if "nuxt.config" in p.lower()], "high")
+        _add(tags, "frontend-web", ["package.json"], "high")
+    if any(name in deps for name in ["vite", "vitest"]) or any("vite.config" in p for p in lower_paths):
+        _add(tags, "vite-app", ["package.json"] + [p for p in paths if "vite.config" in p.lower()], "medium")
+        _add(tags, "frontend-web", ["package.json"], "medium")
+    if "astro" in deps or any("astro.config" in p for p in lower_paths):
+        _add(tags, "astro-app", ["package.json"] + [p for p in paths if "astro.config" in p.lower()], "high")
+        _add(tags, "frontend-web", ["package.json"], "high")
+    if any(name in deps for name in ["@remix-run/react", "@remix-run/node"]) or any("remix.config" in p for p in lower_paths):
+        _add(tags, "remix-app", ["package.json"] + [p for p in paths if "remix.config" in p.lower()], "high")
+        _add(tags, "frontend-web", ["package.json"], "high")
+    if any("storybook" in name for name in deps) or any(".storybook/" in p for p in lower_paths):
+        _add(tags, "storybook", ["package.json"] + [p for p in paths if ".storybook/" in p.lower()], "medium")
     if "vue" in deps:
         _add(tags, "vue-app", ["package.json"], "high")
     if "svelte" in deps:
@@ -113,6 +180,10 @@ def detect_stack(repo: str | Path, inventory: Dict[str, Any]) -> Dict[str, Any]:
         _add(tags, "shadcn-ui", [p for p in paths if "shadcn" in p.lower()] or ["package.json"], "medium")
     if any("figma" in p for p in lower_paths):
         _add(tags, "figma-driven", [p for p in paths if "figma" in p.lower()], "medium")
+    root_manifest = _json_file(root, "manifest.json")
+    extension_manifest = root_manifest.get("manifest_version") if isinstance(root_manifest, dict) else None
+    if extension_manifest or any("extension" in p and ("manifest.json" in p or "browser" in p) for p in lower_paths):
+        _add(tags, "browser-extension", [p for p in paths if "extension" in p.lower() or "manifest.json" in p.lower()], "medium")
     if "@playwright/test" in deps or "playwright" in deps or any("playwright" in p for p in lower_paths):
         _add(tags, "playwright", ["package.json"] + [p for p in paths if "playwright" in p.lower()], "high")
     if "cypress" in deps or any("cypress" in p for p in lower_paths):
@@ -129,6 +200,98 @@ def detect_stack(repo: str | Path, inventory: Dict[str, Any]) -> Dict[str, Any]:
         _add(tags, "infra-terraform", [p for p in paths if "terraform" in p.lower() or p.endswith(".tf")], "medium")
     if any("kubernetes" in p or "k8s" in p for p in lower_paths):
         _add(tags, "kubernetes", [p for p in paths if "kubernetes" in p.lower() or "k8s" in p.lower()], "medium")
+    if inventory.get("ci", {}).get("workflows"):
+        _add(tags, "github-actions", inventory.get("ci", {}).get("workflows", []), "high")
+        _add(tags, "ci-cd", inventory.get("ci", {}).get("workflows", []), "high")
+    if any(p.lower().endswith((".sql", ".dbml")) or "migration" in p.lower() or "schema.prisma" in p.lower() for p in paths):
+        _add(tags, "database", [p for p in paths if p.lower().endswith((".sql", ".dbml")) or "migration" in p.lower() or "schema.prisma" in p.lower()], "medium")
+    if any(name in deps for name in ["prisma", "@prisma/client"]):
+        _add(tags, "prisma", ["package.json"], "high")
+    if any(name in deps for name in ["drizzle-orm", "typeorm", "sequelize"]):
+        _add(tags, "drizzle", ["package.json"], "medium")
+    if any(name in deps for name in ["jsonwebtoken", "passport", "next-auth", "@auth/core", "oauth", "bcrypt"]):
+        _add(tags, "auth", ["package.json"], "medium")
+        _add(tags, "security-sensitive", ["package.json"], "medium")
+    security_tokens = {"auth", "authentication", "authorization", "permission", "permissions", "rbac", "oauth", "jwt"}
+    security_paths = [p for p in paths if _has_token(p, security_tokens)]
+    if (root / "SECURITY.md").exists():
+        security_paths.append("SECURITY.md")
+    if security_paths:
+        _add(tags, "security-sensitive", security_paths, "medium")
+    if any("security" in p.lower() or "secret" in p.lower() or ".env" in p.lower() for p in paths):
+        _add(tags, "secrets", [p for p in paths if "security" in p.lower() or "secret" in p.lower() or ".env" in p.lower()], "medium")
+    if any(name in deps for name in ["autocannon", "k6", "benchmark", "tinybench"]):
+        _add(tags, "benchmark", ["package.json"], "medium")
+        _add(tags, "performance", ["package.json"], "medium")
+    if any(name in deps for name in ["bullmq", "bull", "ioredis", "redis", "@upstash/redis"]):
+        _add(tags, "queue", ["package.json"], "medium")
+        _add(tags, "cache", ["package.json"], "medium")
+        _add(tags, "performance", ["package.json"], "medium")
+    if any("worker" in p.lower() or "queue" in p.lower() or "cache" in p.lower() for p in paths):
+        _add(tags, "worker-service", [p for p in paths if any(term in p.lower() for term in ["worker", "queue", "cache"])], "medium")
+    if any("load" in p.lower() or "benchmark" in p.lower() or "perf" in p.lower() for p in paths):
+        _add(tags, "performance", [p for p in paths if "load" in p.lower() or "benchmark" in p.lower() or "perf" in p.lower()], "medium")
+    if any(name in deps for name in ["@sentry/browser", "@sentry/node", "@opentelemetry/api", "prom-client"]):
+        _add(tags, "observability", ["package.json"], "medium")
+    if any("opentelemetry" in p.lower() or "prometheus" in p.lower() or "grafana" in p.lower() or "sentry" in p.lower() for p in paths):
+        _add(tags, "observability", [p for p in paths if any(term in p.lower() for term in ["opentelemetry", "prometheus", "grafana", "sentry"])], "medium")
+    if any(name in deps for name in ["react-native", "expo", "flutter"]):
+        _add(tags, "mobile-native", ["package.json"], "medium")
+        if "react-native" in deps:
+            _add(tags, "react-native", ["package.json"], "medium")
+        if "expo" in deps:
+            _add(tags, "react-native", ["package.json"], "medium")
+        if "flutter" in deps:
+            _add(tags, "flutter", ["package.json"], "medium")
+    mobile_paths = [
+        p for p in paths
+        if p.lower().endswith((".xcodeproj", ".xcworkspace"))
+        or "androidmanifest.xml" in p.lower()
+        or p.lower().startswith(("ios/", "android/"))
+        or p.lower().endswith("pubspec.yaml")
+    ]
+    if mobile_paths:
+        _add(tags, "mobile-native", mobile_paths, "medium")
+    if any(p.lower().endswith("pubspec.yaml") for p in paths):
+        _add(tags, "flutter", [p for p in paths if p.lower().endswith("pubspec.yaml")], "medium")
+    if any(p.lower().startswith("ios/") or p.lower().endswith((".xcodeproj", ".xcworkspace")) for p in paths):
+        _add(tags, "ios", [p for p in paths if p.lower().startswith("ios/") or p.lower().endswith((".xcodeproj", ".xcworkspace"))], "medium")
+    if any(p.lower().startswith("android/") or "androidmanifest.xml" in p.lower() for p in paths):
+        _add(tags, "android", [p for p in paths if p.lower().startswith("android/") or "androidmanifest.xml" in p.lower()], "medium")
+    if any("watchos" in p.lower() or "watchkit" in p.lower() for p in paths):
+        _add(tags, "watchos", [p for p in paths if "watchos" in p.lower() or "watchkit" in p.lower()], "medium")
+    if any("tvos" in p.lower() for p in paths):
+        _add(tags, "tvos", [p for p in paths if "tvos" in p.lower()], "medium")
+    if any(name in deps for name in ["electron", "@tauri-apps/api"]):
+        _add(tags, "desktop-native", ["package.json"], "medium")
+        if "electron" in deps:
+            _add(tags, "electron", ["package.json"], "medium")
+        if "@tauri-apps/api" in deps:
+            _add(tags, "tauri", ["package.json"], "medium")
+    if any("electron" in p.lower() for p in paths):
+        _add(tags, "desktop-native", [p for p in paths if "electron" in p.lower()], "medium")
+        _add(tags, "electron", [p for p in paths if "electron" in p.lower()], "medium")
+    if any(p.lower().startswith("src-tauri/") or "tauri.conf" in p.lower() for p in paths):
+        _add(tags, "desktop-native", [p for p in paths if p.lower().startswith("src-tauri/") or "tauri.conf" in p.lower()], "medium")
+        _add(tags, "tauri", [p for p in paths if p.lower().startswith("src-tauri/") or "tauri.conf" in p.lower()], "medium")
+    ai_ml_tokens = {"ai", "ml", "cv", "dataset", "datasets", "notebook", "notebooks", "opencv", "inference", "training", "eval", "modelcard"}
+    ai_ml_paths = [
+        p for p in paths
+        if p.lower().endswith((".ipynb", ".onnx", ".pt", ".pth", ".h5"))
+        or _has_token(p, ai_ml_tokens)
+        or "model-card" in p.lower()
+    ]
+    if ai_ml_paths:
+        _add(tags, "ai-ml", ai_ml_paths, "medium")
+    if any(name in deps for name in ["torch", "tensorflow", "opencv-python", "scikit-learn", "transformers"]):
+        _add(tags, "ai-ml", ["package.json"], "medium")
+        if "opencv-python" in deps:
+            _add(tags, "cv", ["package.json"], "medium")
+    if any(
+        bool(item.get("validation_scripts")) if isinstance(item, dict) else False
+        for item in inventory.get("manifests", [])
+    ):
+        _add(tags, "qa-validation", ["manifest validation scripts"], "medium")
     if inventory.get("codex", {}).get("exists"):
         _add(tags, "codex-ready", [inventory.get("codex", {}).get("config") or ".codex"], "high")
     if inventory.get("omx", {}).get("exists"):
@@ -154,9 +317,10 @@ def detect_stack(repo: str | Path, inventory: Dict[str, Any]) -> Dict[str, Any]:
         "profile_groups": {
             "codex_omx_native": [t for t in tags if t.startswith("codex") or t.startswith("omx") or "mcp" in t],
             "language_runtime": [t for t in tags if t in {"python", "node-js-ts", "typescript", "go", "rust", "shell-cli"}],
-            "frontend_design": [t for t in tags if t in {"frontend-web", "react-app", "nextjs-app", "vue-app", "svelte-app", "angular-app", "tailwind", "shadcn-ui", "figma-driven", "playwright", "cypress"}],
+            "frontend_design": [t for t in tags if t in {"frontend-web", "react-app", "nextjs-app", "vue-app", "svelte-app", "angular-app", "nuxt-app", "vite-app", "astro-app", "remix-app", "storybook", "tailwind", "shadcn-ui", "figma-driven", "playwright", "cypress", "browser-extension"}],
             "backend_api_data": [t for t in tags if t in {"openapi", "graphql", "trpc"}],
             "infra_deployment": [t for t in tags if t in {"docker", "infra-terraform", "kubernetes"}],
+            "quality_security_data": [t for t in tags if t in {"qa-validation", "security-sensitive", "auth", "database", "ai-ml", "observability", "performance", "queue", "cache", "worker-service"}],
             "specialized_gated_leads": [t for t in tags if t in {"codex-skill-repo", "codex-plugin-repo", "mcp-server-or-client"}],
         },
     }

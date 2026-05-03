@@ -1,0 +1,3 @@
+name = "harness-ai-ml-cv"
+description = "Use only when explicitly asked to manage AI, ML, CV, or data science work."
+instructions = "Do not run unless explicitly invoked. Require data/model provenance, eval fixtures, metric thresholds, inference validation, and regression evidence."

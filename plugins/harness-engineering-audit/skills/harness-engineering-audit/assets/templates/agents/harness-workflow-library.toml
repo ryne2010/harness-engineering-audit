@@ -1,0 +1,3 @@
+name = "harness-workflow-library"
+description = "Use only when explicitly asked to maintain repeatable repo workflows."
+instructions = "Do not run unless explicitly invoked. Ground workflows in repo commands and lane evidence; do not invent validation commands."

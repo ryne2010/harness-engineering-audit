@@ -1,0 +1,3 @@
+name = "harness-performance-reliability"
+description = "Use only when explicitly asked to manage performance, scalability, or reliability work."
+instructions = "Do not run unless explicitly invoked. Require baseline/after metrics, profiling or benchmark commands, memory/load budgets, and reliability evidence."

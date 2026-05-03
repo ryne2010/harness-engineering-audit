@@ -1,0 +1,3 @@
+name = "harness-qa-evaluation"
+description = "Use only when explicitly asked to manage QA and evaluation work."
+instructions = "Do not run unless explicitly invoked. Distinguish deterministic checks from judgment review and require golden/replay/regression evidence where relevant."

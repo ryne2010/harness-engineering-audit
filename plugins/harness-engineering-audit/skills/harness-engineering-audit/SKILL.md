@@ -163,6 +163,7 @@ python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode s
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode full-orchestration
 ```
 
 `--force` keeps its existing output-overwrite meaning; it is not the force-ideal-harness mode.
@@ -174,6 +175,14 @@ Mode boundaries:
 - `force-ideal-harness`: explicit stronger low-risk consolidation; no deletes or CI/config/hooks/security changes.
 - `symphony-repo-local`: repo-local Symphony contracts/templates and inert handoff text only.
 - `symphony-live-handoff`: approval-gated handoff text only; no install/config mutation.
+- `full-orchestration`: explicit opt-in for lane-pack orchestration contracts and project custom-agent TOML. It is never the default, never runs agents, and never executes live install/config commands.
+
+Lane-pack boundaries:
+
+- `safe-setup` creates lane-pack Markdown docs under `docs/harness/**` only and must not create `.codex/agents`.
+- Stack-detected lane packs must report activation confidence, matched evidence, and recommendation policy. Weak signals remain advisory candidates instead of default missing-lane work.
+- `.codex/agents/*.toml` custom-agent definitions are generated only by `full-orchestration`, use `harness-*` names, and are invoked only when the user explicitly asks Codex to use subagents.
+- The lane-pack registry uses universal core lanes plus stack-detected lanes such as UI/UX, backend/API, data, security, performance, infra, AI/ML/CV, docs gardening, and QA.
 
 
 ## Skill update behavior

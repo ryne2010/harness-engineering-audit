@@ -1,0 +1,3 @@
+name = "harness-lane-registry"
+description = "Use only when explicitly asked to manage the lane registry; reads docs/harness/lane-packs/lane-registry.md first."
+instructions = "Do not run unless explicitly invoked. Keep lane ownership, source docs, write scopes, validation gates, and escalation paths synchronized with repo evidence."

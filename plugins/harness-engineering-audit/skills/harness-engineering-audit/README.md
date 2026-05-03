@@ -22,6 +22,7 @@ The skill is strict and audit-first, but low-risk audit recommendations are auto
 - progressive-disclosure guidance for keeping hot-path instructions concise
 - deterministic automated checks versus judgment-based automated/human review boundaries
 - generated artifact lifecycle
+- lane-pack registry coverage for grounded source-of-truth surfaces, including universal core lanes plus stack-detected UI/UX, backend/API, data, security, performance, infra, AI/ML/CV, docs, and QA lanes
 - Symphony orchestration readiness (static signals for workflow contracts, task-state handoffs, workspace isolation, agent runner guidance, observability, validation, and recovery)
 - scaffolding / preview / legacy entropy
 - cross-agent surfaces such as Claude, Cursor, Windsurf, Cline, Gemini, and Copilot files
@@ -86,9 +87,10 @@ python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode s
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode full-orchestration
 ```
 
-`--force` remains only the output-directory overwrite flag; it is not the force-ideal-harness mode.
+`safe-setup` creates docs-only lane packs under `docs/harness/**` and never creates `.codex/agents`. Stack-detected lanes include activation confidence and recommendation policy fields so weak layout signals can remain advisory instead of inflating missing-lane work. `full-orchestration` is explicit opt-in for project custom-agent TOML and stronger orchestration contracts; it still does not spawn agents or execute live commands. `--force` remains only the output-directory overwrite flag; it is not the force-ideal-harness mode.
 
 ## Recommended workflow
 
@@ -123,6 +125,7 @@ This skill follows the principle that agent-ready repositories need:
 - deterministic feedback loops
 - safe tool configuration
 - clear subagent/team workflow
+- grounded lane packs and source-of-truth surfaces for repeated agent work without design, contract, docs, or validation drift, with confidence-gated stack recommendations for unusual repo layouts
 - generated artifact lifecycle
 - Symphony orchestration readiness (static signals for workflow contracts, task-state handoffs, workspace isolation, agent runner guidance, observability, validation, and recovery)
 - explicit scaffolding/legacy cleanup policy

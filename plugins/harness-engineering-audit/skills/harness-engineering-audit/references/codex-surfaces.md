@@ -44,11 +44,13 @@ Audit these repo surfaces when present.
 
 ## Subagents and team workflow
 
+- `.codex/agents/*.toml` only when explicitly created by full orchestration
 - `.omx/**`
 - worktree protocol
 - PRD/test-spec artifacts
 - team/finisher workflow
 - path ownership rules
+- custom-agent names avoid built-ins and document explicit invocation only
 
 ## Validation
 
@@ -69,3 +71,4 @@ Audit these repo surfaces when present.
 - doc gardening workflow
 - raw source / synthesized docs boundaries
 - docs health checks for stale claims, contradictions, orphan pages, broken links, and missing cross-references
+- lane-pack source-of-truth docs under `docs/harness/lane-packs/**`

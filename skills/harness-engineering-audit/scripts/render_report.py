@@ -344,6 +344,15 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
             "description": "Explicit opt-in handoff text for live runtime setup. It performs no install/config mutation.",
         },
         {
+            "stage": "full-orchestration",
+            "label": "Run full orchestration setup",
+            "skill": "python",
+            "prompt_file": None,
+            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode full-orchestration",
+            "recommended": False,
+            "description": "Explicit opt-in mode for stronger orchestration contracts and project custom-agent TOML. It is never the default.",
+        },
+        {
             "stage": "symphony-adoption",
             "label": "Plan Symphony adoption",
             "skill": "$ralplan",
@@ -751,6 +760,47 @@ def render_readiness_registry_summary(scorecard: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def render_lane_pack_registry_summary(scorecard: Dict[str, Any]) -> str:
+    registry = scorecard.get("lane_pack_registry", {}) or {}
+    lanes = registry.get("lanes", {}) or {}
+    mode_safety = registry.get("mode_safety", {}) or {}
+    lines = [
+        "## Lane Pack Registry",
+        "",
+        f"Schema: `{registry.get('schema', 'harness-engineering-audit.lane-pack-registry.v1')}`",
+        "",
+        "- Audit report-only: `" + str(mode_safety.get("audit_report_only", True)) + "`",
+        "- Safe setup docs-only: `" + str(mode_safety.get("safe_setup_docs_only", True)) + "`",
+        "- Custom agents full-orchestration only: `" + str(mode_safety.get("custom_agents_full_orchestration_only", True)) + "`",
+        "",
+        f"- Active lanes: {len(registry.get('active_lane_ids', []) or [])}",
+        f"- Recommended/missing lanes: {len(registry.get('recommended_lane_ids', []) or [])}",
+        "",
+        "| Lane | Status | Activation | Confidence | Policy | Risk | Evidence examples |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for lane_id, payload in sorted(lanes.items()):
+        evidence = payload.get("evidence", []) if isinstance(payload, dict) else []
+        activation_evidence = payload.get("activation_evidence", []) if isinstance(payload, dict) else []
+        combined_evidence = []
+        for item in evidence + activation_evidence:
+            if item not in combined_evidence:
+                combined_evidence.append(item)
+        examples = ", ".join(f"`{item}`" for item in combined_evidence[:3]) if combined_evidence else "None detected"
+        lines.append(
+            f"| {lane_id} | {payload.get('status', 'missing')} | {payload.get('activation', 'not_activated')} | {payload.get('activation_confidence', 'none')} | {payload.get('recommendation_policy', 'not-applicable')} | {payload.get('risk', 'low')} | {examples} |"
+        )
+    if not lanes:
+        lines.append("| No lane registry collected | missing | n/a | none | not-applicable | low | None detected |")
+    lines.extend(
+        [
+            "",
+            "`safe-setup` creates docs-only lane packs under `docs/harness/**`. `.codex/agents/*.toml` is reserved for explicit `full-orchestration`.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render_main_report(
     inventory: Dict[str, Any],
     scorecard: Dict[str, Any],
@@ -817,6 +867,8 @@ Mode: `{mode}`.
 - Scaffold/legacy marker hits: {total_markers}
 
 {render_readiness_registry_summary(scorecard)}
+
+{render_lane_pack_registry_summary(scorecard)}
 
 {render_symphony_summary(inventory, scorecard, paths)}
 

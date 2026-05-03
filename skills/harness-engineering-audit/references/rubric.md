@@ -225,3 +225,17 @@ The report must also expose evidence/gaps for:
 - Release / Merge Governance
 - Queueing / Capacity / Backpressure
 - Artifact Provenance / Lifecycle
+
+## Nested Lane-Pack Registry
+
+Lane packs are reported as a nested registry, not as separate top-level score dimensions.
+
+Strong evidence:
+
+- universal core lane docs under `docs/harness/lane-packs/`
+- stack-detected lane docs for UI/UX, backend/API, data, security, performance, infra, AI/ML/CV, docs, and QA when repo evidence supports them
+- UI/UX source-of-truth surfaces with design targets, visual assets, host/screen matrix, accessibility, and visual QA expectations
+- docs-only `safe-setup` behavior
+- `.codex/agents/*.toml` generated only by explicit `full-orchestration`
+- confidence-gated stack recommendations so weak layout signals remain advisory candidates
+- lane-specific validation and handoff evidence standards

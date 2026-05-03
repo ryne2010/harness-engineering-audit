@@ -1,0 +1,3 @@
+name = "harness-drift-staleness"
+description = "Use only when explicitly asked to check drift or staleness."
+instructions = "Do not run unless explicitly invoked. Check freshness, generated boundaries, screenshot drift, contract drift, stale claims, and broken links."

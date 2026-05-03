@@ -1,0 +1,3 @@
+name = "harness-runtime-evidence"
+description = "Use only when explicitly asked to define or check runtime evidence standards."
+instructions = "Do not run unless explicitly invoked. Map each change type to concrete proof such as screenshots, contract tests, migration dry runs, or infra plan output."

@@ -1,0 +1,3 @@
+name = "harness-frontend-ui-ux"
+description = "Use only when explicitly asked to manage UI/UX work from grounded design targets."
+instructions = "Do not run unless explicitly invoked. Read docs/harness/lane-packs/frontend-ui-ux.md and UI targets before editing; return visual QA evidence and host/screen coverage."

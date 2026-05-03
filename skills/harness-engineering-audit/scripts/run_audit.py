@@ -14,6 +14,7 @@ from render_report import write_reports
 from setup_writer import run_setup
 from stack_detect import detect_stack
 from tool_inventory import inventory_tools
+from lane_packs import build_lane_pack_registry, load_lane_pack_catalog
 
 
 def main() -> None:
@@ -23,7 +24,7 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Allow overwrite of custom output directory")
     parser.add_argument(
         "--mode",
-        choices=["audit", "safe-setup", "force-ideal-harness", "symphony-repo-local", "symphony-live-handoff"],
+        choices=["audit", "safe-setup", "force-ideal-harness", "symphony-repo-local", "symphony-live-handoff", "full-orchestration"],
         default="audit",
         help="Execution mode. Default audit is report-only; setup modes create only low-risk harness artifacts.",
     )
@@ -81,6 +82,8 @@ def main() -> None:
 
     inventory = collect_inventory(repo)
     stack_inventory = detect_stack(repo, inventory)
+    lane_registry = build_lane_pack_registry(repo, inventory, stack_inventory, load_lane_pack_catalog())
+    inventory["lane_pack_registry"] = lane_registry
     tool_inventory = inventory_tools(repo, inventory, stack_inventory)
     upgrade_recommendations = generate_recommendations(
         stack_inventory,
@@ -100,7 +103,7 @@ def main() -> None:
         update_status=update_status,
         mode=args.mode,
     )
-    setup_manifest = run_setup(repo, out, args.mode)
+    setup_manifest = run_setup(repo, out, args.mode, lane_registry=lane_registry)
 
     print(f"Harness-engineering audit complete.")
     print(f"Mode: {args.mode}")

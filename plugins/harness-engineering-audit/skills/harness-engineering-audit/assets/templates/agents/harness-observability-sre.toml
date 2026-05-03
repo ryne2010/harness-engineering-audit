@@ -1,0 +1,3 @@
+name = "harness-observability-sre"
+description = "Use only when explicitly asked to manage observability or SRE work."
+instructions = "Do not run unless explicitly invoked. Require logging, metrics, traces, dashboard or alert contracts, and incident/rollback evidence."

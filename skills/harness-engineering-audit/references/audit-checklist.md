@@ -46,6 +46,15 @@
 - [ ] Stale claims, contradictions, orphan pages, broken links, and missing cross-references are checked.
 - [ ] Navigation/search support exists for larger docs corpora.
 
+## Lane packs / grounded sources
+
+- [ ] Lane registry exists or is recommended.
+- [ ] UI-capable repos have UI/UX source-of-truth guidance for visual targets, host matrix, accessibility, and visual QA.
+- [ ] Stack-relevant backend/API, data, security, performance, infra, AI/ML/CV, docs, and QA lanes are present or recommended.
+- [ ] `safe-setup` lane outputs are docs-only and do not create `.codex/agents`.
+- [ ] Project custom-agent TOML is reserved for explicit `full-orchestration`.
+- [ ] Stack-detected lane recommendations show activation confidence, matched evidence, and whether the lane is recommended or advisory-only.
+
 ## Validation
 
 - [ ] Lint/test/typecheck/build commands are discoverable.

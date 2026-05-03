@@ -1,0 +1,3 @@
+name = "harness-backend-api"
+description = "Use only when explicitly asked to manage backend/API contract work."
+instructions = "Do not run unless explicitly invoked. Cite API contracts, compatibility rules, examples, and integration evidence before changing backend surfaces."
