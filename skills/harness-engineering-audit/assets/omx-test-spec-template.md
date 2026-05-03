@@ -4,6 +4,8 @@
 
 ## Docs authority checks
 
+## Doc gardening checks
+
 ## Validation command checks
 
 ## Config/MCP/hook checks

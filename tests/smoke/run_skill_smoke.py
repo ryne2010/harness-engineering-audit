@@ -29,6 +29,34 @@ def main() -> int:
         (repo / ".git").mkdir()
         (repo / "AGENTS.md").write_text("# AGENTS.md\n\nRun tests before merge.\n", encoding="utf-8")
         (repo / "README.md").write_text("# Smoke repo\n", encoding="utf-8")
+        (repo / "docs").mkdir()
+        (repo / "docs" / "GLOSSARY.md").write_text(
+            "# Glossary\n\nCanonical term: smoke repo. Avoid: demo repo.\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "REVIEW.md").write_text(
+            "# Review\n\nAutomated checks are deterministic. Human review reads the diff.\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "index.md").write_text(
+            "# Docs Index\n\nCatalog of source-of-truth docs and generated knowledge pages.\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "log.md").write_text(
+            "# Docs Log\n\n## [2026-05-02] ingest | Smoke source\n\nAppend-only docs maintenance log.\n",
+            encoding="utf-8",
+        )
+        (repo / "docs" / "GARDENING.md").write_text(
+            "# Doc Gardening\n\nRaw sources are immutable. Generated synthesis pages are refreshed during ingest/query/lint docs workflows. Check for stale claims, contradictions, orphan pages, broken links, missing cross-references, and docs search coverage.\n",
+            encoding="utf-8",
+        )
+        (repo / "raw").mkdir()
+        (repo / "docs" / "knowledge").mkdir()
+        (repo / "internal" / "adr").mkdir(parents=True)
+        (repo / "internal" / "adr" / "0001-smoke.md").write_text(
+            "# ADR 0001\n\nContradicts ADR notes should be surfaced explicitly.\n",
+            encoding="utf-8",
+        )
         (repo / ".codex").mkdir()
         (repo / ".codex" / "config.toml").write_text(
             "model = 'gpt-5.5'\n[mcp_servers.docs]\ncommand = 'docs-mcp'\n",
@@ -181,15 +209,48 @@ def main() -> int:
         if "overall_score" not in score:
             print("scorecard missing overall_score", file=sys.stderr)
             return 1
+        if score.get("score_schema_version") != "2":
+            print(f"scorecard missing score_schema_version=2: {score.get('score_schema_version')}", file=sys.stderr)
+            return 1
+        if score.get("lifecycle", {}).get("classification") not in {"greenfield-bootstrap", "brownfield-cleanup", "mature-audit"}:
+            print(f"scorecard missing lifecycle classification: {score.get('lifecycle')}", file=sys.stderr)
+            return 1
+        if score.get("readiness_registry", {}).get("schema") != "harness-engineering-audit.readiness-registry.v1":
+            print("scorecard missing readiness registry", file=sys.stderr)
+            return 1
         dimension_names = {d.get("name") for d in score.get("dimensions", [])}
+        if "Vocabulary / Domain Language Control" not in dimension_names:
+            print("scorecard missing Vocabulary / Domain Language Control dimension", file=sys.stderr)
+            return 1
+        if "Doc Gardening / Knowledge Base Readiness" not in dimension_names:
+            print("scorecard missing Doc Gardening / Knowledge Base Readiness dimension", file=sys.stderr)
+            return 1
         if "Symphony Orchestration Readiness" not in dimension_names:
             print("scorecard missing Symphony Orchestration Readiness dimension", file=sys.stderr)
             return 1
         inventory = json.loads((out / "inventory.json").read_text(encoding="utf-8"))
+        if inventory.get("lifecycle", {}).get("classification") not in {"greenfield-bootstrap", "brownfield-cleanup", "mature-audit"}:
+            print(f"inventory missing lifecycle classification: {inventory.get('lifecycle')}", file=sys.stderr)
+            return 1
+        if inventory.get("readiness_registry", {}).get("schema") != "harness-engineering-audit.readiness-registry.v1":
+            print("inventory missing readiness_registry", file=sys.stderr)
+            return 1
+        if "vocabulary_readiness" not in inventory:
+            print("inventory missing vocabulary_readiness", file=sys.stderr)
+            return 1
+        if "doc_gardening_readiness" not in inventory:
+            print("inventory missing doc_gardening_readiness", file=sys.stderr)
+            return 1
         if "symphony_readiness" not in inventory:
             print("inventory missing symphony_readiness", file=sys.stderr)
             return 1
         report_text = (out / "report.md").read_text(encoding="utf-8")
+        if "Vocabulary / Domain Language Control" not in report_text:
+            print("report missing Vocabulary / Domain Language Control section", file=sys.stderr)
+            return 1
+        if "Doc Gardening / Knowledge Base Readiness" not in report_text:
+            print("report missing Doc Gardening / Knowledge Base Readiness section", file=sys.stderr)
+            return 1
         if "Symphony Orchestration Readiness" not in report_text:
             print("report missing Symphony readiness section", file=sys.stderr)
             return 1
@@ -228,6 +289,10 @@ def main() -> int:
             print("next-step missing agents_priority", file=sys.stderr)
             return 1
         stages = {stage.get("stage") for stage in next_step.get("stages", [])}
+        for stage_name in {"safe-setup", "force-ideal-harness", "symphony-repo-local", "symphony-live-handoff"}:
+            if stage_name not in stages:
+                print(f"next-step missing {stage_name} stage", file=sys.stderr)
+                return 1
         if "symphony-adoption" not in stages:
             print("next-step missing symphony-adoption stage", file=sys.stderr)
             return 1
@@ -288,6 +353,168 @@ def main() -> int:
         ]
         if not agent_recs or not all(r.get("auto_approved") for r in agent_recs):
             print("AGENTS low-risk recommendations should be auto-approved", file=sys.stderr)
+            return 1
+
+        template_dir = REPO_ROOT / "skills" / "harness-engineering-audit" / "assets" / "templates"
+        required_templates = {
+            "AGENTS.md",
+            "docs-index.md",
+            "validation-matrix.md",
+            "doc-gardening.md",
+            "task-contract.md",
+            "agent-role-topology.md",
+            "symphony-readiness.md",
+            "task-state-schema.md",
+            "observability-proof-schema.md",
+            "recovery-reconciliation.md",
+            "source-trust-policy.md",
+            "evaluation-regression-harness.md",
+            "release-merge-governance.md",
+            "queue-capacity-policy.md",
+            "artifact-provenance-policy.md",
+            "cleanup-plan.md",
+            "symphony-setup-handoff.md",
+            "symphony-live-handoff.md",
+        }
+        missing_templates = [name for name in sorted(required_templates) if not (template_dir / name).exists()]
+        if missing_templates:
+            print(f"missing bundled templates: {missing_templates}", file=sys.stderr)
+            return 1
+
+        minimal = Path(td) / "minimal"
+        minimal.mkdir()
+        audit_minimal = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(minimal), "--mode", "audit", "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if audit_minimal.returncode != 0:
+            print(audit_minimal.stdout)
+            print(audit_minimal.stderr, file=sys.stderr)
+            return audit_minimal.returncode
+        minimal_out = minimal / ".codex" / "reports" / "harness-engineering-audit"
+        minimal_inventory = json.loads((minimal_out / "inventory.json").read_text(encoding="utf-8"))
+        minimal_score = json.loads((minimal_out / "scorecard.json").read_text(encoding="utf-8"))
+        minimal_next = json.loads((minimal_out / "next-step.json").read_text(encoding="utf-8"))
+        if minimal_inventory.get("lifecycle", {}).get("classification") != "greenfield-bootstrap":
+            print(f"minimal repo should be greenfield-bootstrap: {minimal_inventory.get('lifecycle')}", file=sys.stderr)
+            return 1
+        if minimal_score.get("lifecycle", {}).get("classification") != "greenfield-bootstrap":
+            print(f"minimal score lifecycle mismatch: {minimal_score.get('lifecycle')}", file=sys.stderr)
+            return 1
+        if minimal_next.get("default_stage") != "safe-setup":
+            print(f"minimal repo default_stage should be safe-setup: {minimal_next}", file=sys.stderr)
+            return 1
+        if (minimal / "AGENTS.md").exists() or (minimal / "docs").exists():
+            print("audit mode must not create source harness files", file=sys.stderr)
+            return 1
+
+        setup_result = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(minimal), "--mode", "safe-setup", "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if setup_result.returncode != 0:
+            print(setup_result.stdout)
+            print(setup_result.stderr, file=sys.stderr)
+            return setup_result.returncode
+        setup_manifest_path = minimal_out / "setup-rollback-manifest.json"
+        if not setup_manifest_path.exists():
+            print("safe-setup missing setup rollback manifest", file=sys.stderr)
+            return 1
+        setup_manifest = json.loads(setup_manifest_path.read_text(encoding="utf-8"))
+        for key in {"schema", "mode", "generated_at", "created", "modified", "deprecated", "collisions", "skipped"}:
+            if key not in setup_manifest:
+                print(f"setup manifest missing {key}: {setup_manifest}", file=sys.stderr)
+                return 1
+        if setup_manifest.get("mode") != "safe-setup" or setup_manifest.get("schema") != "harness-engineering-audit.setup-rollback.v1":
+            print(f"unexpected setup manifest metadata: {setup_manifest}", file=sys.stderr)
+            return 1
+        if not (minimal / "AGENTS.md").exists() or not (minimal / "docs" / "harness" / "task-contract.md").exists():
+            print("safe-setup did not create expected harness files", file=sys.stderr)
+            return 1
+        if "Generated by harness-engineering-audit" not in (minimal / "AGENTS.md").read_text(encoding="utf-8"):
+            print("generated AGENTS missing provenance marker", file=sys.stderr)
+            return 1
+        second_setup = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(minimal), "--mode", "safe-setup", "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if second_setup.returncode != 0:
+            print(second_setup.stdout)
+            print(second_setup.stderr, file=sys.stderr)
+            return second_setup.returncode
+        second_manifest = json.loads(setup_manifest_path.read_text(encoding="utf-8"))
+        if second_manifest.get("created"):
+            print(f"safe-setup rerun should be idempotent, saw created: {second_manifest}", file=sys.stderr)
+            return 1
+
+        score_registry_categories = set(minimal_score.get("readiness_registry", {}).get("categories", {}))
+        inventory_registry_categories = set(minimal_inventory.get("readiness_registry", {}).get("categories", {}))
+        for required_category in {
+            "vocabulary_domain_language_control",
+            "doc_gardening_knowledge_base_readiness",
+            "task_contract_ticket_quality",
+            "agent_role_topology_isolation",
+            "state_machine_reconciliation",
+            "observability_depth",
+            "environment_reproducibility",
+            "safety_trust_boundaries",
+            "evaluation_regression_harness",
+            "cost_context_token_budgeting",
+            "release_merge_governance",
+            "queueing_capacity_backpressure",
+            "artifact_provenance_lifecycle",
+            "symphony_orchestration_readiness",
+        }:
+            if required_category not in score_registry_categories:
+                print(f"score readiness registry missing {required_category}: {sorted(score_registry_categories)}", file=sys.stderr)
+                return 1
+            if required_category not in inventory_registry_categories:
+                print(f"inventory readiness registry missing {required_category}: {sorted(inventory_registry_categories)}", file=sys.stderr)
+                return 1
+
+        repo_local_result = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(minimal), "--mode", "symphony-repo-local", "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if repo_local_result.returncode != 0:
+            print(repo_local_result.stdout)
+            print(repo_local_result.stderr, file=sys.stderr)
+            return repo_local_result.returncode
+        repo_local_handoff = minimal_out / "symphony-repo-local-handoff.md"
+        if not repo_local_handoff.exists() or "Approval Required" not in repo_local_handoff.read_text(encoding="utf-8"):
+            print("symphony-repo-local missing inert install/config handoff", file=sys.stderr)
+            return 1
+        repo_local_doc_handoff = minimal / "docs" / "harness" / "symphony-setup-handoff.md"
+        if not repo_local_doc_handoff.exists() or "Install command: approval required" not in repo_local_doc_handoff.read_text(encoding="utf-8"):
+            print("symphony-repo-local missing repo-local inert setup handoff", file=sys.stderr)
+            return 1
+
+        symphony_result = subprocess.run(
+            [sys.executable, "-S", str(RUN_AUDIT), str(minimal), "--mode", "symphony-live-handoff", "--no-check-update"],
+            cwd=str(REPO_ROOT),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if symphony_result.returncode != 0:
+            print(symphony_result.stdout)
+            print(symphony_result.stderr, file=sys.stderr)
+            return symphony_result.returncode
+        live_handoff = minimal_out / "symphony-live-handoff.md"
+        if not live_handoff.exists() or "Approval Required" not in live_handoff.read_text(encoding="utf-8"):
+            print("symphony-live-handoff missing inert approval-gated handoff", file=sys.stderr)
             return 1
 
         print("smoke passed")

@@ -1,8 +1,11 @@
 {
+  "score_schema_version": "2",
   "dimensions": [
     "Agent Legibility",
     "Instruction Hygiene",
     "Docs Authority",
+    "Vocabulary / Domain Language Control",
+    "Doc Gardening / Knowledge Base Readiness",
     "Validation Truth",
     "Harness Feedback Loops",
     "Codex Config Readiness",
@@ -20,5 +23,11 @@
     "low",
     "medium",
     "high"
-  ]
+  ],
+  "lifecycle": {
+    "classification": "greenfield-bootstrap|brownfield-cleanup|mature-audit"
+  },
+  "readiness_registry": {
+    "schema": "harness-engineering-audit.readiness-registry.v1"
+  }
 }

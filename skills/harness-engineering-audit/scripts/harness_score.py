@@ -12,6 +12,8 @@ DIMENSIONS = [
     "Agent Legibility",
     "Instruction Hygiene",
     "Docs Authority",
+    "Vocabulary / Domain Language Control",
+    "Doc Gardening / Knowledge Base Readiness",
     "Validation Truth",
     "Harness Feedback Loops",
     "Codex Config Readiness",
@@ -83,6 +85,8 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     dims: List[Dict[str, Any]] = []
     manifests = inv.get("manifests", [])
     docs = inv.get("docs", {})
+    vocabulary = inv.get("vocabulary_readiness", {})
+    doc_gardening = inv.get("doc_gardening_readiness", {})
     instructions = inv.get("instruction_files", [])
     codex = inv.get("codex", {})
     skills = inv.get("skills", {})
@@ -90,6 +94,8 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     ci = inv.get("ci", {})
     markers = inv.get("markers", {})
     gen = inv.get("generated_artifacts", {})
+    lifecycle = inv.get("lifecycle", {})
+    readiness_registry = inv.get("readiness_registry", {})
 
     # 1 Agent Legibility
     evidence: List[str] = []
@@ -206,7 +212,69 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         s = add(s, 1, evidence, f"Validation-related docs detected: {len(inv.get('validation_docs', []))}.")
     dims.append(dim("Docs Authority", s, evidence, gaps, recs))
 
-    # 4 Validation Truth
+    # 4 Vocabulary / Domain Language Control
+    evidence, gaps, recs = [], [], []
+    categories = vocabulary.get("categories", {}) if isinstance(vocabulary, dict) else {}
+    category_status = vocabulary.get("category_status", {}) if isinstance(vocabulary, dict) else {}
+    s = 0
+    vocab_checks = [
+        ("glossary_or_terms", "Project glossary or canonical vocabulary surfaces are discoverable."),
+        ("adr_or_decision_records", "ADR or decision-record surfaces are discoverable."),
+        ("conflict_guidance", "Guidance exists for surfacing conflicts with canonical docs or ADRs."),
+        ("progressive_disclosure_guidance", "Progressive-disclosure or context-budget guidance is discoverable."),
+    ]
+    for key, message in vocab_checks:
+        paths = categories.get(key, []) if isinstance(categories, dict) else []
+        if category_status.get(key) or paths:
+            s += 2
+            evidence.append(f"{message} Examples: {', '.join(paths[:5])}")
+        else:
+            gaps.append(f"Missing vocabulary readiness signal: {key.replace('_', ' ')}.")
+    if s >= 6:
+        s += 1
+    if gaps:
+        recs.append({
+            "risk": "low",
+            "title": "Add domain vocabulary guidance",
+            "detail": "Add or link a concise glossary/domain-language surface, including canonical terms, terms to avoid, ADR conflict rules, and which detailed docs should be loaded only when relevant.",
+        })
+    if not categories:
+        gaps.append("No vocabulary readiness inventory was collected.")
+    dims.append(dim("Vocabulary / Domain Language Control", s, evidence, gaps, recs))
+
+    # 5 Doc Gardening / Knowledge Base Readiness
+    evidence, gaps, recs = [], [], []
+    garden_categories = doc_gardening.get("categories", {}) if isinstance(doc_gardening, dict) else {}
+    garden_status = doc_gardening.get("category_status", {}) if isinstance(doc_gardening, dict) else {}
+    s = 0
+    garden_checks = [
+        ("source_boundaries", "Raw source / source-of-truth boundaries are discoverable."),
+        ("generated_knowledge_layer", "Generated or synthesized knowledge layer signals are discoverable."),
+        ("maintenance_workflows", "Doc maintenance workflows are discoverable."),
+        ("indexes_and_logs", "Docs indexes or chronological logs are discoverable."),
+        ("health_checks", "Doc health-check signals exist for contradictions, stale claims, or orphaned pages."),
+        ("navigation_search", "Navigation or search support for larger docs corpora is discoverable."),
+    ]
+    for key, message in garden_checks:
+        paths = garden_categories.get(key, []) if isinstance(garden_categories, dict) else []
+        if garden_status.get(key) or paths:
+            s += 1
+            evidence.append(f"{message} Examples: {', '.join(paths[:5])}")
+        else:
+            gaps.append(f"Missing doc gardening signal: {key.replace('_', ' ')}.")
+    # Scale six static categories to a 10-point dimension.
+    s = round((s / len(garden_checks)) * 10) if garden_checks else 0
+    if gaps:
+        recs.append({
+            "risk": "low",
+            "title": "Add doc gardening workflow",
+            "detail": "Document source boundaries, generated/synthesized docs ownership, ingest/query/lint workflows, indexes/logs, and recurring checks for stale claims, contradictions, orphan pages, missing cross-references, and broken links.",
+        })
+    if not garden_categories:
+        gaps.append("No doc gardening readiness inventory was collected.")
+    dims.append(dim("Doc Gardening / Knowledge Base Readiness", s, evidence, gaps, recs))
+
+    # 6 Validation Truth
     evidence, gaps, recs = [], [], []
     s = 0
     validations = script_names(manifests, ["test", "lint", "typecheck", "build", "validate", "smoke", "e2e", "check"])
@@ -225,7 +293,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         s = add(s, 1, evidence, "Validation commands are mentioned in docs/manifests.")
     dims.append(dim("Validation Truth", s, evidence, gaps, recs))
 
-    # 5 Harness Feedback Loops
+    # 7 Harness Feedback Loops
     evidence, gaps, recs = [], [], []
     s = 0
     tools_dev = [m for m in manifests if m.get("path", "").startswith("tools/") or "tools/dev" in m.get("path", "")]
@@ -235,7 +303,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     else:
         gaps.append("No generated/golden/report artifact directories detected.")
     if any_script(manifests, ["preflight", "smoke", "e2e", "validate"]):
-        s = add(s, 3, evidence, "Preflight/smoke/e2e/validate scripts detected.")
+        s = add(s, 3, evidence, "Deterministic preflight/smoke/e2e/validate checks detected.")
     else:
         gaps.append("No obvious preflight/smoke/e2e validation loop detected.")
     if ci.get("workflows"):
@@ -244,9 +312,22 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         s = add(s, 1, evidence, "tools/dev manifest-like files detected.")
     if docs.get("generated_policy_docs"):
         s = add(s, 1, evidence, "Generated artifact policy exists.")
+    review_docs = [
+        p for p in docs.get("files", [])
+        if any(term in p.lower() for term in ["review", "pr", "pull_request", "quality"])
+    ]
+    if review_docs:
+        s = add(s, 1, evidence, f"Review guidance candidates detected: {', '.join(review_docs[:5])}.")
+    else:
+        gaps.append("No obvious guidance separating deterministic checks from judgment-based automated/human review.")
+        recs.append({
+            "risk": "low",
+            "title": "Clarify check versus review loops",
+            "detail": "Document which feedback loops are deterministic automated checks and which are judgment-based automated or human reviews, so agents know what can be self-corrected from pass/fail output.",
+        })
     dims.append(dim("Harness Feedback Loops", s, evidence, gaps, recs))
 
-    # 6 Codex Config
+    # 8 Codex Config
     evidence, gaps, recs = [], [], []
     s = 5
     if codex.get("exists"):
@@ -261,7 +342,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         s = add(s, 1, evidence, "Codex hooks config present.")
     dims.append(dim("Codex Config Readiness", s, evidence, gaps, recs))
 
-    # 7 Skills
+    # 9 Skills
     evidence, gaps, recs = [], [], []
     s = 4
     repo_skills = skills.get("repo_skills", [])
@@ -280,7 +361,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         s = add(s, 1, evidence, "No duplicate skill names detected.")
     dims.append(dim("Skills Readiness", s, evidence, gaps, recs))
 
-    # 8 MCP
+    # 10 MCP
     evidence, gaps, recs = [], [], []
     mcp = codex.get("mcp_servers", [])
     s = 6
@@ -298,7 +379,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
             recs.append({"risk": "low", "title": "Document MCP purpose", "detail": "Document MCP server purpose, expected availability, auth/secrets, and failure mode."})
     dims.append(dim("MCP Readiness", s, evidence, gaps, recs))
 
-    # 9 Hooks/rules
+    # 11 Hooks/rules
     evidence, gaps, recs = [], [], []
     s = 7
     if codex.get("hooks"):
@@ -309,7 +390,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         s = add(s, 1, evidence, f"Codex rules detected: {len(codex.get('rules', []))} files.")
     dims.append(dim("Hooks / Rules Safety", s, evidence, gaps, recs))
 
-    # 10 OMX
+    # 12 OMX
     evidence, gaps, recs = [], [], []
     s = 3
     if omx.get("exists"):
@@ -324,7 +405,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         s = add(s, 1, evidence, "Agent/worktree workflow docs detected.")
     dims.append(dim("Subagent / OMX Workflow", s, evidence, gaps, recs))
 
-    # 11 Cross-agent compatibility
+    # 13 Cross-agent compatibility
     evidence, gaps, recs = [], [], []
     cross = inv.get("cross_agent", {}).get("surfaces", [])
     s = 7
@@ -336,7 +417,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         evidence.append("No cross-agent instruction surfaces detected.")
     dims.append(dim("Cross-Agent Compatibility", s, evidence, gaps, recs))
 
-    # 12 Entropy/scaffolding
+    # 14 Entropy/scaffolding
     evidence, gaps, recs = [], [], []
     counts = markers.get("counts", {})
     total_markers = sum(int(v) for v in counts.values()) if counts else 0
@@ -361,13 +442,14 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         recs.append({"risk": "low", "title": "Add generated artifact policy", "detail": "Classify checked-in reports/golden data/generated outputs as active evidence, generated on demand, archive, or delete."})
     dims.append(dim("Entropy / Scaffolding Control", s, evidence, gaps, recs))
 
-    # 13 Production readiness
+    # 15 Production readiness
     evidence, gaps, recs = [], [], []
     s = 0
     # Aggregate selected dimensions.
     partial_scores = {d["name"]: d["score"] for d in dims}
     selected = [
         "Agent Legibility", "Instruction Hygiene", "Docs Authority", "Validation Truth",
+        "Vocabulary / Domain Language Control", "Doc Gardening / Knowledge Base Readiness",
         "Harness Feedback Loops", "Entropy / Scaffolding Control"
     ]
     avg = round(sum(partial_scores.get(x, 0) for x in selected) / len(selected)) if selected else 0
@@ -383,7 +465,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
 
 
 
-    # 14 Symphony orchestration readiness
+    # 16 Symphony orchestration readiness
     evidence, gaps, recs = [], [], []
     symphony = inv.get("symphony_readiness", {})
     categories = symphony.get("categories", {}) if isinstance(symphony, dict) else {}
@@ -455,10 +537,66 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
             "detail": "Use this audit as input to an OMX ralplan pass, then execute auto-approved low-risk changes without asking for another approval."
         })
 
+    lifecycle_classification = lifecycle.get("classification", "brownfield-cleanup")
+    readiness_categories = readiness_registry.get("categories", {}) if isinstance(readiness_registry, dict) else {}
+    readiness_status = readiness_registry.get("category_status", {}) if isinstance(readiness_registry, dict) else {}
+    readiness_recommendations = []
+    for key, paths in readiness_categories.items():
+        if not readiness_status.get(key):
+            readiness_recommendations.append({
+                "category": key,
+                "risk": "low",
+                "auto_approved": True,
+                "approval": "auto-approved",
+                "title": f"Add {key.replace('_', ' ')} guidance",
+                "detail": "Create compact, progressively disclosed harness guidance or templates for this missing readiness category.",
+            })
+
+    if lifecycle_classification == "greenfield-bootstrap":
+        low_risk.append({
+            "risk": "low",
+            "priority": "p0",
+            "auto_approved": True,
+            "approval": "auto-approved",
+            "dimension": "Lifecycle",
+            "title": "Run safe setup for production-ready harness skeleton",
+            "detail": "Create compact low-risk harness docs/templates for a minimal repo using progressive disclosure and provenance markers.",
+        })
+    elif lifecycle_classification == "brownfield-cleanup" and readiness_recommendations:
+        low_risk.append({
+            "risk": "low",
+            "priority": "p1",
+            "auto_approved": True,
+            "approval": "auto-approved",
+            "dimension": "Lifecycle",
+            "title": "Plan safe harness consolidation",
+            "detail": "Add missing low-risk readiness surfaces and produce a cleanup plan for medium/high-risk degraded harness pieces.",
+        })
+
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "score_schema_version": "2",
         "overall_score": overall,
         "overall_status": verdict,
+        "lifecycle": {
+            "classification": lifecycle_classification,
+            "score_modifier": (
+                "setup-needed" if lifecycle_classification == "greenfield-bootstrap"
+                else "cleanup-needed" if lifecycle_classification == "brownfield-cleanup"
+                else "none"
+            ),
+        },
+        "readiness_registry": {
+            "schema": "harness-engineering-audit.readiness-registry.v1",
+            "categories": {
+                key: {
+                    "status": "present" if readiness_status.get(key) else "missing",
+                    "evidence": paths[:10] if isinstance(paths, list) else [],
+                }
+                for key, paths in readiness_categories.items()
+            },
+            "recommendations": readiness_recommendations,
+        },
         "dimensions": dims,
         "auto_approval_policy": {
             "enabled": True,

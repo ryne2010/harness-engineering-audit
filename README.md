@@ -15,6 +15,11 @@ It is audit-first and strict, but aggressive about safe follow-up work. It inven
 - approval-gated official/high-trust upgrade recommendations
 - CI workflows
 - docs authority and index coverage
+- glossary, terminology, ADR, and domain-language surfaces that keep agent vocabulary consistent
+- doc gardening / knowledge-base readiness, including source boundaries, generated/synthesized docs, indexes/logs, and stale/contradiction/orphan checks
+- progressive-disclosure guidance that keeps hot-path instructions concise
+- deterministic automated checks versus judgment-based automated/human review boundaries
+- lifecycle classification and readiness registry coverage for broader harness/Symphony concepts
 - generated artifact lifecycle
 - Symphony orchestration readiness (static signals for workflow contracts, task-state handoffs, workspace isolation, agent runner guidance, observability, validation, and recovery)
 - scaffolding / preview / legacy entropy
@@ -124,6 +129,17 @@ The audit replaces the previous generated report set at:
 Use the generated handoff with OMX. In an interactive OMX run, the skill should present **Plan auto-approved fixes** as the default selection so you do not need to copy/paste the long prompt. To resume later, type only:
 
 Upgrade recommendations are report-only by default: tools are recommended, follow-up web verification is requested, human approval is required, and the audit never executes install/config commands or claims local-script web verification.
+
+Explicit setup modes are available when you want the skill to create low-risk harness infrastructure:
+
+```bash
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode safe-setup
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff
+```
+
+The default `--mode audit` remains report-only. `--force` remains only the output-directory overwrite flag.
 
 ```text
 $harness-engineering-audit continue

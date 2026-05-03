@@ -66,3 +66,6 @@ Audit these repo surfaces when present.
 - archive policy
 - architecture map
 - command registry
+- doc gardening workflow
+- raw source / synthesized docs boundaries
+- docs health checks for stale claims, contradictions, orphan pages, broken links, and missing cross-references

@@ -18,7 +18,8 @@ This skill is **audit-first, AGENTS-first, and low-risk auto-approved**. It may 
 3. Produce a strict report with low/medium/high-risk recommendations.
 4. Generate AGENTS.md priority and OMX handoff artifacts.
 5. Auto-approve low-risk fixes, with root `AGENTS.md` as P0 when it is missing, oversized, stale, or lacks docs/validation pointers.
-6. Use OMX planning/execution for auto-approved low-risk fixes; defer medium/high-risk changes until explicit approval.
+6. Classify lifecycle as `greenfield-bootstrap`, `brownfield-cleanup`, or `mature-audit`.
+7. Use OMX planning/execution or explicit setup modes for auto-approved low-risk fixes; defer medium/high-risk changes until explicit approval.
 
 The default report location is:
 
@@ -59,12 +60,16 @@ Treat OpenAI/Codex guidance as normative:
 - Repo-local docs should be the system of record.
 - Validation should be executable and evidence-backed.
 - Skills should encode repeatable workflows.
+- Domain vocabulary should be discoverable and progressively disclosed, so agents use project language consistently without bloating hot-path instructions.
+- Docs should be gardened as living knowledge: raw sources, synthesized docs, indexes, logs, and health checks need explicit boundaries and maintenance workflows.
 - MCP should solve real external/context access problems.
 - Hooks/rules should be deterministic, scoped, and safe.
 - Subagents/team workflows should have clear delegation, path scope, and review boundaries.
 - Generated artifacts and scaffolding require lifecycle policies.
 
 Use Claude/Cursor/Karpathy/third-party resources only as comparison material, not as authority over Codex behavior.
+The vocabulary/domain-language audit surface is informed by Matt Pocock's Dictionary of AI Coding as comparison material: shared terms, handoff artifacts, progressive disclosure, and the distinction between deterministic checks and review are useful harness concepts, but this skill should not copy that repo's prose.
+The doc-gardening audit surface is informed by Andrej Karpathy's LLM Wiki gist as comparison material: persistent markdown knowledge bases, source/wiki/schema layering, ingest/query/lint workflows, indexes/logs, and wiki health checks are useful harness concepts, but this skill should not copy that gist's prose.
 
 ## Required evidence to inspect
 
@@ -81,6 +86,9 @@ Always inventory these surfaces when present:
 - `.github/workflows/**`
 - root README and docs indexes
 - `docs/**`
+- glossary / terminology / domain-language docs such as `docs/GLOSSARY.md`, `docs/TERMINOLOGY.md`, `internal/CONTEXT.md`, `internal/domain.md`, and `dictionary/**`
+- ADR / decision-record surfaces such as `docs/adr/**`, `docs/ADR/**`, and `internal/adr/**`
+- doc gardening / wiki / knowledge-base surfaces such as raw sources, generated/synthesized docs, `index.md`, `log.md`, ingest/query/lint workflows, and stale/contradiction/orphan/broken-link checks
 - validation scripts and package scripts
 - test/build/lint/typecheck/smoke commands
 - generated artifact directories
@@ -140,6 +148,33 @@ Use a custom output directory only when needed:
 python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --out /tmp/harness-engineering-audit
 ```
 
+## Execution modes
+
+The script default remains report-only:
+
+```bash
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode audit
+```
+
+Additional explicit modes create only low-risk harness artifacts with provenance markers and `setup-rollback-manifest.json`:
+
+```bash
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode safe-setup
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff
+```
+
+`--force` keeps its existing output-overwrite meaning; it is not the force-ideal-harness mode.
+
+Mode boundaries:
+
+- `audit`: reports only, no target source mutation.
+- `safe-setup`: creates missing low-risk docs/templates only.
+- `force-ideal-harness`: explicit stronger low-risk consolidation; no deletes or CI/config/hooks/security changes.
+- `symphony-repo-local`: repo-local Symphony contracts/templates and inert handoff text only.
+- `symphony-live-handoff`: approval-gated handoff text only; no install/config mutation.
+
 
 ## Skill update behavior
 
@@ -170,19 +205,29 @@ The report scores:
 1. Agent Legibility
 2. Instruction Hygiene
 3. Docs Authority
-4. Validation Truth
-5. Harness Feedback Loops
-6. Codex Config Readiness
-7. Skills Readiness
-8. MCP Readiness
-9. Hooks / Rules Safety
-10. Subagent / OMX Workflow
-11. Cross-Agent Compatibility
-12. Entropy / Scaffolding Control
-13. Production Readiness
-14. Symphony Orchestration Readiness
+4. Vocabulary / Domain Language Control
+5. Doc Gardening / Knowledge Base Readiness
+6. Validation Truth
+7. Harness Feedback Loops
+8. Codex Config Readiness
+9. Skills Readiness
+10. MCP Readiness
+11. Hooks / Rules Safety
+12. Subagent / OMX Workflow
+13. Cross-Agent Compatibility
+14. Entropy / Scaffolding Control
+15. Production Readiness
+16. Symphony Orchestration Readiness
 
 Scores are strict and intentionally opinionated. A score is not a final truth; it is an evidence-backed signal to guide planning.
+
+The scorecard also includes a lifecycle object and a readiness registry:
+
+- `score_schema_version: "2"`
+- `lifecycle.classification`
+- `readiness_registry.categories`
+
+The readiness registry exposes additional harness/Symphony categories without silently adding every category as a top-level score dimension.
 
 ## Fix classification
 
@@ -199,6 +244,9 @@ Auto-approved by default for an OMX follow-up pass. AGENTS.md items are P0 and s
 - document real validation commands
 - add a command registry
 - add a validation matrix
+- add or link concise glossary/domain-language guidance
+- add a doc gardening workflow for indexes, logs, source boundaries, and docs health checks
+- clarify deterministic automated checks versus judgment-based automated/human review
 - add a generated artifact policy
 - add a DX preflight script
 - classify generated artifacts

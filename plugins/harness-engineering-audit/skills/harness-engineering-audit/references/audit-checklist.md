@@ -29,6 +29,23 @@
 - [ ] Archive/generated docs are distinguished from active docs.
 - [ ] Internal links are plausible.
 
+## Vocabulary / domain language
+
+- [ ] Glossary, terminology, or domain-language docs are discoverable when the repo has domain-specific concepts.
+- [ ] Canonical terms and terms to avoid are documented where useful.
+- [ ] ADRs or decision records are discoverable.
+- [ ] Agents are told to surface conflicts with canonical docs or ADRs.
+- [ ] Detailed domain docs are progressively disclosed instead of pasted into hot-path instructions.
+
+## Doc gardening / knowledge base
+
+- [ ] Raw sources and source-of-truth docs are distinct from generated/synthesized docs.
+- [ ] Generated or synthesized docs have ownership and freshness rules.
+- [ ] Ingest/query/lint workflows are documented where docs are expected to compound over time.
+- [ ] Docs indexes and chronological logs exist where useful.
+- [ ] Stale claims, contradictions, orphan pages, broken links, and missing cross-references are checked.
+- [ ] Navigation/search support exists for larger docs corpora.
+
 ## Validation
 
 - [ ] Lint/test/typecheck/build commands are discoverable.
@@ -39,6 +56,7 @@
 ## Harness feedback loops
 
 - [ ] Preflight scripts exist where useful.
+- [ ] Deterministic automated checks are distinguished from automated/human review.
 - [ ] Fixtures/golden data are governed.
 - [ ] Generated reports have lifecycle policy.
 - [ ] Agents can reproduce and validate changes.

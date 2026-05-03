@@ -17,6 +17,10 @@ The skill is strict and audit-first, but low-risk audit recommendations are auto
 - approval-gated official/high-trust upgrade recommendations
 - CI workflows
 - docs authority and index coverage
+- glossary, terminology, ADR, and domain-language surfaces that keep agent vocabulary consistent
+- doc gardening / knowledge-base readiness, including source boundaries, generated/synthesized docs, indexes/logs, and stale/contradiction/orphan checks
+- progressive-disclosure guidance for keeping hot-path instructions concise
+- deterministic automated checks versus judgment-based automated/human review boundaries
 - generated artifact lifecycle
 - Symphony orchestration readiness (static signals for workflow contracts, task-state handoffs, workspace isolation, agent runner guidance, observability, validation, and recovery)
 - scaffolding / preview / legacy entropy
@@ -67,6 +71,25 @@ The scripts do **not** change source files, docs, config, hooks, MCP, skills, or
 
 Upgrade recommendations are report-only by default: `recommend_tools=true`, web verification is requested but not claimed by local Python scripts, human approval is required, and install/config mutation is disabled.
 
+## Modes
+
+Default audit mode is report-only:
+
+```bash
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode audit
+```
+
+Explicit setup modes create low-risk harness artifacts with provenance markers and a rollback manifest:
+
+```bash
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode safe-setup
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local
+python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff
+```
+
+`--force` remains only the output-directory overwrite flag; it is not the force-ideal-harness mode.
+
 ## Recommended workflow
 
 1. Run the audit.
@@ -94,6 +117,8 @@ This skill follows the principle that agent-ready repositories need:
 
 - concise hot-path instructions
 - versioned source-of-truth docs
+- canonical project vocabulary that agents can load when relevant
+- living doc gardening workflows for maintaining synthesized knowledge over time
 - reliable validation commands
 - deterministic feedback loops
 - safe tool configuration
@@ -101,6 +126,7 @@ This skill follows the principle that agent-ready repositories need:
 - generated artifact lifecycle
 - Symphony orchestration readiness (static signals for workflow contracts, task-state handoffs, workspace isolation, agent runner guidance, observability, validation, and recovery)
 - explicit scaffolding/legacy cleanup policy
+- lifecycle classification and readiness registry coverage without bloating the top-level score dimensions
 
 OpenAI/Codex guidance is the normative source. Cross-agent resources are included only as comparison material.
 

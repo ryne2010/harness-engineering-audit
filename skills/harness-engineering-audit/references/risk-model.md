@@ -10,6 +10,7 @@ Safe candidates for an approved OMX plan:
 - document existing commands
 - add a validation matrix
 - add a generated artifact policy
+- add a doc gardening workflow that documents existing source/doc boundaries and health checks
 - trim duplicate root `AGENTS.md` content
 - add a DX preflight script that only reads state
 - classify scaffolding without deleting it

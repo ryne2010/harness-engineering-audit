@@ -101,6 +101,7 @@ def build_path_context(inventory: Dict[str, Any], out_dir: Path) -> Dict[str, st
         "web_verification_queue": report_file("web-verification-queue.json"),
         "source_trust_policy": report_file("source-trust-policy.md"),
         "update_status": report_file("update-status.json"),
+        "setup_rollback_manifest": report_file("setup-rollback-manifest.json"),
     }
 
 
@@ -154,7 +155,7 @@ Read `{paths['omx_handoff']}` first, then follow its referenced read order.
 
 Conduct a strict harness-engineering deep review only for unresolved medium/high-risk questions.
 
-- Ask only questions that affect instruction surfaces, validation truth, Codex/OMX/MCP/skills/hooks safety, docs authority, generated artifact lifecycle, or execution risk.
+- Ask only questions that affect instruction surfaces, validation truth, Codex/OMX/MCP/skills/hooks safety, docs authority, doc gardening, generated artifact lifecycle, or execution risk.
 - Do not implement changes during the interview.
 - Prefer evidence-backed questions grounded in `{paths['report']}`, `{paths['findings']}`, and `{paths['recommended_fixes']}`.
 - Do not re-litigate auto-approved low-risk AGENTS.md fixes unless they would cross into risky config, CI, hook, MCP, source-structure, security, or deletion work.
@@ -208,7 +209,7 @@ Execute the auto-approved low-risk fixes from the harness-engineering plan. If a
 
 - Treat root `AGENTS.md` as the first file to improve when it is missing, oversized, stale, or lacks docs/validation pointers.
 - Keep root `AGENTS.md` concise and map-like; move detailed policy into docs instead of bloating the hot path.
-- Preserve repo-specific docs and source-of-truth boundaries.
+- Preserve repo-specific docs, source-of-truth boundaries, and generated/synthesized doc ownership.
 - Update validation evidence.
 - Do not modify risky config, hooks, MCP, CI, source structure, security/sandbox settings, or delete scaffolding without explicit approval.
 """
@@ -283,16 +284,64 @@ Plan only. Do not install, configure, mutate source, or run generated install co
     raise ValueError(f"unknown stage: {stage}")
 
 
-def render_next_step_json(paths: Dict[str, str]) -> Dict[str, Any]:
+def default_stage_for(inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
+    lifecycle = (inventory.get("lifecycle", {}) or {}).get("classification")
+    low_risk = scorecard.get("recommendations", {}).get("low_risk", []) or []
+    medium = scorecard.get("recommendations", {}).get("medium_risk", []) or []
+    high = scorecard.get("recommendations", {}).get("high_risk", []) or []
+    if lifecycle == "greenfield-bootstrap" and low_risk and not medium and not high:
+        return "safe-setup"
+    return "ralplan"
+
+
+def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> Dict[str, Any]:
+    default_stage = default_stage_for(inventory, scorecard)
+    repo_root = paths["repo_root"]
     stages = [
+        {
+            "stage": "safe-setup",
+            "label": "Run safe setup",
+            "skill": "python",
+            "prompt_file": None,
+            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode safe-setup",
+            "recommended": default_stage == "safe-setup",
+            "description": "Create only missing low-risk harness docs/templates with provenance markers and a rollback manifest.",
+        },
         {
             "stage": "ralplan",
             "label": "Plan auto-approved fixes",
             "skill": "$ralplan",
             "prompt_file": paths["ralplan_prompt"],
             "command": prompt_command("$ralplan", paths["ralplan_prompt"]),
-            "recommended": True,
+            "recommended": default_stage == "ralplan",
             "description": "Default next step after a fresh audit; turns auto-approved low-risk findings into an execution-ready plan with AGENTS.md first.",
+        },
+        {
+            "stage": "force-ideal-harness",
+            "label": "Run force-ideal-harness",
+            "skill": "python",
+            "prompt_file": None,
+            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode force-ideal-harness",
+            "recommended": False,
+            "description": "Explicit mode for stronger low-risk consolidation/replacement. It does not delete files or change CI/config/hooks/security.",
+        },
+        {
+            "stage": "symphony-repo-local",
+            "label": "Set up repo-local Symphony contracts",
+            "skill": "python",
+            "prompt_file": None,
+            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-repo-local",
+            "recommended": False,
+            "description": "Write repo-local Symphony templates/contracts and inert install/config/rollback handoff text only.",
+        },
+        {
+            "stage": "symphony-live-handoff",
+            "label": "Write Symphony live setup handoff",
+            "skill": "python",
+            "prompt_file": None,
+            "command": f"python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode symphony-live-handoff",
+            "recommended": False,
+            "description": "Explicit opt-in handoff text for live runtime setup. It performs no install/config mutation.",
         },
         {
             "stage": "symphony-adoption",
@@ -342,21 +391,23 @@ def render_next_step_json(paths: Dict[str, str]) -> Dict[str, Any]:
     ]
     return {
         "schema": "harness-engineering-audit.next-step.v1",
-        "default_stage": "ralplan",
+        "default_stage": default_stage,
         "minimal_resume_command": "$harness-engineering-audit continue",
         "report_dir": paths["report_dir"],
+        "repo_root": repo_root,
         "agents_priority": paths["agents_priority"],
         "omx_handoff": paths["omx_handoff"],
         "stages": stages,
     }
 
 
-def render_next_step_markdown(paths: Dict[str, str]) -> str:
-    next_step = render_next_step_json(paths)
+def render_next_step_markdown(paths: Dict[str, str], inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
+    next_step = render_next_step_json(paths, inventory, scorecard)
+    default_label = next((stage["label"] for stage in next_step["stages"] if stage["stage"] == next_step["default_stage"]), "Plan auto-approved fixes")
     lines = [
         "# Harness Engineering Audit: Next Step",
         "",
-        "Default next stage: **Plan auto-approved fixes**.",
+        f"Default next stage: **{default_label}**.",
         "",
         "Low-risk findings are auto-approved for the follow-up execution pass. AGENTS.md improvements are P0 and should be planned/executed first. Medium/high-risk findings still require explicit approval.",
         "",
@@ -377,7 +428,7 @@ def render_next_step_markdown(paths: Dict[str, str]) -> str:
                 f"### {stage['label']}",
                 "",
                 f"- Skill: `{stage['skill']}`",
-                f"- Prompt file: `{stage['prompt_file']}`",
+                f"- Prompt file: `{stage['prompt_file'] or 'n/a'}`",
                 f"- Command, if you need it: `{stage['command']}`",
                 f"- When: {stage['description']}",
                 "",
@@ -386,7 +437,7 @@ def render_next_step_markdown(paths: Dict[str, str]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_next_step_artifacts(paths: Dict[str, str], out_dir: Path) -> None:
+def write_next_step_artifacts(paths: Dict[str, str], out_dir: Path, inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> None:
     prompts_dir = out_dir / PROMPT_DIR
     prompts_dir.mkdir(parents=True, exist_ok=True)
     for stage, filename in [
@@ -398,9 +449,9 @@ def write_next_step_artifacts(paths: Dict[str, str], out_dir: Path) -> None:
         ("tool-upgrade-ralplan", "tool-upgrade-ralplan.md"),
     ]:
         (prompts_dir / filename).write_text(render_stage_prompt(stage, paths), encoding="utf-8")
-    (out_dir / "next-step.md").write_text(render_next_step_markdown(paths), encoding="utf-8")
+    (out_dir / "next-step.md").write_text(render_next_step_markdown(paths, inventory, scorecard), encoding="utf-8")
     (out_dir / NEXT_STEP_FILE).write_text(
-        json.dumps(render_next_step_json(paths), indent=2, sort_keys=True) + "\n",
+        json.dumps(render_next_step_json(paths, inventory, scorecard), indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
 
@@ -679,12 +730,34 @@ def render_symphony_summary(inventory: Dict[str, Any], scorecard: Dict[str, Any]
     return "\n".join(lines)
 
 
+def render_readiness_registry_summary(scorecard: Dict[str, Any]) -> str:
+    registry = scorecard.get("readiness_registry", {}) or {}
+    categories = registry.get("categories", {}) or {}
+    lines = [
+        "## Lifecycle Harness Readiness Registry",
+        "",
+        f"Schema: `{registry.get('schema', 'harness-engineering-audit.readiness-registry.v1')}`",
+        "",
+        "| Category | Status | Evidence examples |",
+        "|---|---|---|",
+    ]
+    for key, payload in sorted(categories.items()):
+        evidence = payload.get("evidence", []) if isinstance(payload, dict) else []
+        examples = ", ".join(f"`{item}`" for item in evidence[:4]) if evidence else "None detected"
+        status_text = payload.get("status", "missing") if isinstance(payload, dict) else "missing"
+        lines.append(f"| {key.replace('_', ' ')} | {status_text} | {examples} |")
+    if not categories:
+        lines.append("| No registry categories collected | missing | None detected |")
+    return "\n".join(lines)
+
+
 def render_main_report(
     inventory: Dict[str, Any],
     scorecard: Dict[str, Any],
     paths: Dict[str, str],
     upgrade_recommendations: Dict[str, Any] | None = None,
     update_status: Dict[str, Any] | None = None,
+    mode: str = "audit",
 ) -> str:
     recs = scorecard.get("recommendations", {})
     docs = inventory.get("docs", {})
@@ -692,6 +765,8 @@ def render_main_report(
     skills = inventory.get("skills", {})
     omx = inventory.get("omx", {})
     ci = inventory.get("ci", {})
+    vocabulary = inventory.get("vocabulary_readiness", {})
+    doc_gardening = inventory.get("doc_gardening_readiness", {})
     marker_counts = inventory.get("markers", {}).get("counts", {})
     total_markers = sum(int(v) for v in marker_counts.values()) if marker_counts else 0
 
@@ -704,7 +779,12 @@ Repo: `{inventory.get('repo_root')}`
 
 Overall score: **{scorecard.get('overall_score')}/10** ({scorecard.get('overall_status')})
 
-This report has not modified the repo. Low-risk recommendations are auto-approved for the follow-up OMX execution pass; AGENTS.md items are P0 and should be handled first. Medium/high-risk recommendations remain gated on explicit approval.
+Mode: `{mode}`.
+
+`audit` mode is report-only. Explicit setup modes may create low-risk harness artifacts after report generation and record them in `{paths['setup_rollback_manifest']}`. Medium/high-risk recommendations remain gated on explicit approval.
+
+- Lifecycle classification: `{scorecard.get('lifecycle', {}).get('classification', inventory.get('lifecycle', {}).get('classification', 'unknown'))}`
+- Score schema version: `{scorecard.get('score_schema_version', '1')}`
 
 ## Score Summary
 
@@ -725,6 +805,8 @@ This report has not modified the repo. Low-risk recommendations are auto-approve
 - Docs indexes: {len(docs.get('indexes', []))}
 - Authority docs: {len(docs.get('authority_docs', []))}
 - Generated-artifact policy docs: {len(docs.get('generated_policy_docs', []))}
+- Vocabulary readiness signals: {vocabulary.get('readiness_count', 0)}/{vocabulary.get('category_count', 0)}
+- Doc gardening readiness signals: {doc_gardening.get('readiness_count', 0)}/{doc_gardening.get('category_count', 0)}
 - Manifest/build files: {len(inventory.get('manifests', []))}
 - CI workflows: {len(ci.get('workflows', []))}
 - Repo-scoped skills: {len(skills.get('repo_skills', []))}
@@ -733,6 +815,8 @@ This report has not modified the repo. Low-risk recommendations are auto-approve
 - OMX plans: {len(omx.get('plans', []))}
 - Generated/report artifact candidate dirs: {len(inventory.get('generated_artifacts', {}).get('candidate_dirs', []))}
 - Scaffold/legacy marker hits: {total_markers}
+
+{render_readiness_registry_summary(scorecard)}
 
 {render_symphony_summary(inventory, scorecard, paths)}
 
@@ -902,7 +986,7 @@ Default next stage: **Plan auto-approved fixes**.
 13. `.codex/config.toml` if present
 14. `.agents/skills/**` metadata if present
 15. `.omx/**` if present
-16. docs indexes / validation docs referenced in the report
+16. docs indexes / validation docs / doc gardening surfaces referenced in the report
 
 ## Suggested `$ralplan` (default)
 
@@ -951,6 +1035,7 @@ def write_reports(
     tool_inventory: Dict[str, Any] | None = None,
     upgrade_recommendations: Dict[str, Any] | None = None,
     update_status: Dict[str, Any] | None = None,
+    mode: str = "audit",
 ) -> None:
     safe_prepare_output_dir(out_dir, force=force)
     paths = build_path_context(inventory, out_dir)
@@ -978,12 +1063,12 @@ def write_reports(
         render_upgrade_recommendations_markdown(upgrade_recommendations, paths),
         encoding="utf-8",
     )
-    (out_dir / "report.md").write_text(render_main_report(inventory, scorecard, paths, upgrade_recommendations, update_status), encoding="utf-8")
+    (out_dir / "report.md").write_text(render_main_report(inventory, scorecard, paths, upgrade_recommendations, update_status, mode=mode), encoding="utf-8")
     (out_dir / "findings.md").write_text(render_findings(scorecard), encoding="utf-8")
     (out_dir / "recommended-fixes.md").write_text(render_recommended_fixes(scorecard), encoding="utf-8")
     (out_dir / "agents-priority.md").write_text(render_agents_priority(inventory, scorecard), encoding="utf-8")
     (out_dir / "omx-handoff.md").write_text(render_omx_handoff(inventory, scorecard, paths), encoding="utf-8")
-    write_next_step_artifacts(paths, out_dir)
+    write_next_step_artifacts(paths, out_dir, inventory, scorecard)
 
 
 def main() -> None:

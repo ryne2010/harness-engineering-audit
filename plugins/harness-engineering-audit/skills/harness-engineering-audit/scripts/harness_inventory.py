@@ -171,6 +171,206 @@ def find_docs(root: Path) -> Dict[str, Any]:
     return docs
 
 
+def find_vocabulary_surfaces(root: Path) -> Dict[str, Any]:
+    """Collect signals that the repo governs project vocabulary for agents.
+
+    Vocabulary control is a harness surface: agents do better when domain terms,
+    glossary files, ADR language, and "use/avoid" naming rules are easy to find.
+    This intentionally inventories static evidence only.
+    """
+    seed_paths = find_paths(
+        root,
+        [
+            "internal/CONTEXT.md",
+            "internal/domain.md",
+            "docs/GLOSSARY.md",
+            "docs/glossary.md",
+            "docs/TERMINOLOGY.md",
+            "docs/terminology.md",
+            "docs/DOMAIN.md",
+            "docs/domain.md",
+            "docs/ADR",
+            "docs/adr",
+            "internal/adr",
+            "dictionary",
+        ],
+    )
+    glossary_terms = [
+        "glossary",
+        "terminology",
+        "vocabulary",
+        "domain language",
+        "ubiquitous language",
+        "canonical term",
+        "canonical vocabulary",
+        "terms to avoid",
+        "term to avoid",
+    ]
+    vocabulary_paths = seed_paths + find_text_signal_paths(root, glossary_terms, limit=60)
+    adr_paths = []
+    for candidate in ["docs/ADR", "docs/adr", "internal/adr", "adr"]:
+        p = root / candidate
+        if p.exists():
+            if p.is_dir():
+                adr_paths.extend(rel(path, root) for path in iter_files(p) if path.suffix.lower() == ".md")
+            else:
+                adr_paths.append(candidate)
+    adr_paths.extend(find_text_signal_paths(root, ["architecture decision", "decision record", "contradicts adr"], limit=40))
+    conflict_guidance = find_text_signal_paths(
+        root,
+        ["ADR conflict", "contradicts ADR", "conflict with ADR", "source of truth", "canonical vocabulary"],
+        limit=35,
+    )
+    progressive_disclosure = find_text_signal_paths(
+        root,
+        ["progressive disclosure", "load only", "context budget", "token cost", "context window"],
+        limit=35,
+    )
+    categories = {
+        "glossary_or_terms": unique_sorted(vocabulary_paths, limit=80),
+        "adr_or_decision_records": unique_sorted(adr_paths, limit=80),
+        "conflict_guidance": unique_sorted(conflict_guidance, limit=60),
+        "progressive_disclosure_guidance": unique_sorted(progressive_disclosure, limit=60),
+    }
+    category_status = {name: bool(paths) for name, paths in categories.items()}
+    return {
+        "schema": "harness-engineering-audit.vocabulary-readiness.v1",
+        "static_only": True,
+        "categories": categories,
+        "category_status": category_status,
+        "readiness_count": sum(1 for ready in category_status.values() if ready),
+        "category_count": len(categories),
+    }
+
+
+def find_doc_gardening_surfaces(root: Path) -> Dict[str, Any]:
+    """Collect signals for maintained documentation and knowledge-base hygiene.
+
+    This models docs as a living harness artifact: raw sources stay distinct from
+    generated/synthesized docs, agents have explicit maintenance workflows, and
+    indexes/logs/health checks keep the corpus navigable as it grows.
+    """
+    source_boundaries = find_paths(
+        root,
+        [
+            "raw",
+            "sources",
+            "docs/sources",
+            "references",
+            "docs/references",
+            "docs/archive",
+            "archive",
+        ],
+    )
+    source_boundaries.extend(
+        find_text_signal_paths(
+            root,
+            ["raw source", "raw sources", "source of truth", "immutable source", "citation", "citations"],
+            limit=45,
+        )
+    )
+
+    generated_knowledge = find_paths(
+        root,
+        [
+            "wiki",
+            "docs/wiki",
+            "knowledge",
+            "docs/knowledge",
+            "docs/generated",
+            "generated",
+        ],
+    )
+    generated_knowledge.extend(
+        find_text_signal_paths(
+            root,
+            ["wiki", "knowledge base", "summary page", "entity page", "concept page", "synthesis"],
+            limit=45,
+        )
+    )
+
+    maintenance_workflows = find_text_signal_paths(
+        root,
+        [
+            "doc garden",
+            "doc gardening",
+            "docs gardening",
+            "ingest",
+            "query workflow",
+            "lint docs",
+            "docs lint",
+            "documentation maintenance",
+            "maintain docs",
+        ],
+        limit=50,
+    )
+
+    indexes_logs = find_paths(
+        root,
+        [
+            "index.md",
+            "log.md",
+            "docs/index.md",
+            "docs/log.md",
+            "docs/README.md",
+            "CHANGELOG.md",
+        ],
+    )
+    indexes_logs.extend(find_text_signal_paths(root, ["append-only", "chronological log", "docs index", "spec index"], limit=35))
+
+    health_checks = find_text_signal_paths(
+        root,
+        [
+            "contradiction",
+            "contradictions",
+            "stale",
+            "superseded",
+            "orphan",
+            "orphaned",
+            "broken link",
+            "broken links",
+            "cross-reference",
+            "cross references",
+            "missing page",
+        ],
+        limit=60,
+    )
+
+    navigation_search = find_text_signal_paths(
+        root,
+        [
+            "docs search",
+            "wiki search",
+            "knowledge search",
+            "graph view",
+            "backlink",
+            "backlinks",
+            "dataview",
+            "full-text search",
+            "markdown search",
+        ],
+        limit=35,
+    )
+
+    categories = {
+        "source_boundaries": unique_sorted(source_boundaries, limit=80),
+        "generated_knowledge_layer": unique_sorted(generated_knowledge, limit=80),
+        "maintenance_workflows": unique_sorted(maintenance_workflows, limit=80),
+        "indexes_and_logs": unique_sorted(indexes_logs, limit=80),
+        "health_checks": unique_sorted(health_checks, limit=80),
+        "navigation_search": unique_sorted(navigation_search, limit=60),
+    }
+    category_status = {name: bool(paths) for name, paths in categories.items()}
+    return {
+        "schema": "harness-engineering-audit.doc-gardening-readiness.v1",
+        "static_only": True,
+        "categories": categories,
+        "category_status": category_status,
+        "readiness_count": sum(1 for ready in category_status.values() if ready),
+        "category_count": len(categories),
+    }
+
+
 def find_codex(root: Path) -> Dict[str, Any]:
     codex: Dict[str, Any] = {"exists": (root / ".codex").exists(), "config": None, "mcp_servers": [], "hooks": None, "rules": [], "prompts": [], "reports": []}
     config = root / ".codex" / "config.toml"
@@ -407,6 +607,109 @@ def find_symphony_readiness(root: Path) -> Dict[str, Any]:
     }
 
 
+READINESS_CATEGORY_TERMS = {
+    "vocabulary_domain_language_control": [
+        "glossary", "terminology", "domain language", "canonical vocabulary", "canonical term",
+    ],
+    "doc_gardening_knowledge_base_readiness": [
+        "doc gardening", "knowledge base", "ingest", "orphan", "stale claims", "cross-reference",
+    ],
+    "task_contract_ticket_quality": [
+        "acceptance criteria", "task contract", "ticket", "issue template", "scope", "done criteria",
+    ],
+    "agent_role_topology_isolation": [
+        "role topology", "frontend agent", "backend agent", "docs agent", "path ownership", "write scope",
+    ],
+    "state_machine_reconciliation": [
+        "state machine", "queued", "claimed", "blocked", "reconcile", "lease", "stale task",
+    ],
+    "observability_depth": [
+        "proof of work", "trace id", "trace", "decision log", "evidence", "observability",
+    ],
+    "environment_reproducibility": [
+        "fresh clone", "bootstrap", "setup", "toolchain", "dependency install", "local parity",
+    ],
+    "safety_trust_boundaries": [
+        "trust boundary", "prompt injection", "secret", "permission", "sandbox", "supply chain",
+    ],
+    "evaluation_regression_harness": [
+        "eval", "evaluation", "golden task", "replay", "regression harness", "rubric",
+    ],
+    "cost_context_token_budgeting": [
+        "context budget", "token budget", "progressive disclosure", "compaction", "AGENTS size",
+    ],
+    "release_merge_governance": [
+        "release", "merge", "pull request", "PR template", "changelog", "rollback",
+    ],
+    "queueing_capacity_backpressure": [
+        "queue", "capacity", "backpressure", "retry", "priority", "cancellation",
+    ],
+    "artifact_provenance_lifecycle": [
+        "provenance", "generated artifact", "artifact lifecycle", "rollback manifest", "archive policy",
+    ],
+    "symphony_orchestration_readiness": [
+        "symphony", "control plane", "task-state", "issue-tracker", "runner guidance", "reconciliation",
+    ],
+}
+
+
+def find_readiness_registry(root: Path) -> Dict[str, Any]:
+    categories: Dict[str, List[str]] = {}
+    category_status: Dict[str, bool] = {}
+    for name, terms in READINESS_CATEGORY_TERMS.items():
+        paths = find_text_signal_paths(root, terms, limit=60)
+        categories[name] = paths
+        category_status[name] = bool(paths)
+    return {
+        "schema": "harness-engineering-audit.readiness-registry.v1",
+        "categories": categories,
+        "category_status": category_status,
+        "readiness_count": sum(1 for ready in category_status.values() if ready),
+        "category_count": len(category_status),
+    }
+
+
+def classify_lifecycle(root: Path, inventory: Dict[str, Any]) -> Dict[str, Any]:
+    signals = {
+        "file_count_scanned": inventory.get("file_count_scanned", 0),
+        "instruction_files": len(inventory.get("instruction_files", [])),
+        "docs_files": len(inventory.get("docs", {}).get("files", [])),
+        "validation_docs": len(inventory.get("validation_docs", [])),
+        "validation_manifests": len(inventory.get("manifests", [])),
+        "omx_files": len(inventory.get("omx", {}).get("contexts", [])) + len(inventory.get("omx", {}).get("plans", [])),
+        "codex_config": bool(inventory.get("codex", {}).get("config")),
+        "repo_skills": len(inventory.get("skills", {}).get("repo_skills", [])),
+        "readiness_signals": inventory.get("readiness_registry", {}).get("readiness_count", 0),
+    }
+    maturity_points = 0
+    maturity_points += 2 if signals["instruction_files"] else 0
+    maturity_points += 2 if signals["docs_files"] >= 3 else 1 if signals["docs_files"] else 0
+    maturity_points += 2 if signals["validation_docs"] else 0
+    maturity_points += 1 if signals["validation_manifests"] else 0
+    maturity_points += 1 if signals["codex_config"] else 0
+    maturity_points += 1 if signals["omx_files"] else 0
+    maturity_points += 1 if signals["repo_skills"] else 0
+    maturity_points += 2 if signals["readiness_signals"] >= 7 else 1 if signals["readiness_signals"] >= 3 else 0
+
+    if signals["file_count_scanned"] <= 8 and maturity_points <= 2:
+        classification = "greenfield-bootstrap"
+    elif maturity_points >= 9:
+        classification = "mature-audit"
+    else:
+        classification = "brownfield-cleanup"
+
+    return {
+        "schema": "harness-engineering-audit.lifecycle.v1",
+        "classification": classification,
+        "signals": signals,
+        "rationale": [
+            f"Maturity points: {maturity_points}.",
+            "Greenfield requires very few scanned files and almost no harness surfaces.",
+            "Mature repos require multiple instruction, docs, validation, config, workflow, or readiness signals.",
+        ],
+    }
+
+
 def collect_inventory(repo: str | Path) -> Dict[str, Any]:
     root = Path(repo).resolve()
     files = list(iter_files(root)) if root.exists() else []
@@ -425,8 +728,12 @@ def collect_inventory(repo: str | Path) -> Dict[str, Any]:
         "generated_artifacts": generated_artifacts(root),
         "validation_docs": validation_docs(root),
         "markers": marker_scan(root),
+        "vocabulary_readiness": find_vocabulary_surfaces(root),
+        "doc_gardening_readiness": find_doc_gardening_surfaces(root),
         "symphony_readiness": find_symphony_readiness(root),
     }
+    inventory["readiness_registry"] = find_readiness_registry(root)
+    inventory["lifecycle"] = classify_lifecycle(root, inventory)
     return inventory
 
 
