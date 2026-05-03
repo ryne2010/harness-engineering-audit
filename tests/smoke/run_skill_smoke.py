@@ -73,6 +73,23 @@ def assert_recommendation_helper_edges() -> bool:
     return True
 
 
+def assert_tool_catalog_loader() -> bool:
+    if str(SKILL_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SKILL_SCRIPTS))
+    from recommend_tools import load_tool_catalog  # noqa: PLC0415
+
+    entries = load_tool_catalog()
+    ids = {entry.get("id") for entry in entries}
+    required = {"codex-agents-md", "codex-mcp", "omx-native-workflows"}
+    if not required <= ids:
+        print(f"tool catalog loader missing required entries: {sorted(ids)}", file=sys.stderr)
+        return False
+    if not all(isinstance(entry.get("stack_tags"), list) for entry in entries):
+        print(f"tool catalog entries must expose list stack_tags: {entries}", file=sys.stderr)
+        return False
+    return True
+
+
 def assert_recommendation_contract(score: dict, label: str) -> bool:
     recs = score.get("recommendations", {})
     buckets = [
@@ -126,6 +143,31 @@ def assert_recommendation_contract(score: dict, label: str) -> bool:
     return True
 
 
+def assert_handoff_default(out: Path, label: str) -> bool:
+    next_step = json.loads((out / "next-step.json").read_text(encoding="utf-8"))
+    handoff = (out / "omx-handoff.md").read_text(encoding="utf-8")
+    default_stage = next_step.get("default_stage")
+    stage = next((item for item in next_step.get("stages", []) if item.get("stage") == default_stage), None)
+    if not stage:
+        print(f"{label} missing default stage entry: {next_step}", file=sys.stderr)
+        return False
+    expected_label = stage.get("label")
+    expected_command = stage.get("command")
+    if f"Default next stage: **{expected_label}**." not in handoff:
+        print(f"{label} handoff default label mismatch: {expected_label}", file=sys.stderr)
+        return False
+    if f"## Suggested default: {expected_label}" not in handoff:
+        print(f"{label} handoff missing dynamic default heading: {expected_label}", file=sys.stderr)
+        return False
+    if expected_command not in handoff:
+        print(f"{label} handoff missing default command: {expected_command}", file=sys.stderr)
+        return False
+    if "## Suggested `$ralplan` (default)" in handoff:
+        print(f"{label} handoff contains stale hard-coded ralplan default", file=sys.stderr)
+        return False
+    return True
+
+
 def main() -> int:
     if not RUN_AUDIT.exists():
         print(f"missing run_audit.py at {RUN_AUDIT}", file=sys.stderr)
@@ -134,6 +176,8 @@ def main() -> int:
         print(f"missing check_update.py at {CHECK_UPDATE}", file=sys.stderr)
         return 1
     if not assert_recommendation_helper_edges():
+        return 1
+    if not assert_tool_catalog_loader():
         return 1
 
     with tempfile.TemporaryDirectory(prefix="harness-audit-smoke-") as td:
@@ -515,6 +559,8 @@ def main() -> int:
         if "tool-upgrade-ralplan" not in stages:
             print("next-step missing tool-upgrade-ralplan stage", file=sys.stderr)
             return 1
+        if not assert_handoff_default(out, "main fixture"):
+            return 1
 
         stack = json.loads((out / "stack-inventory.json").read_text(encoding="utf-8"))
         stack_tags = {item.get("tag") for item in stack.get("stack_tags", [])}
@@ -757,6 +803,8 @@ def main() -> int:
         minimal_report = (minimal_out / "report.md").read_text(encoding="utf-8")
         if "OMX interactive default: select **Run safe setup**" not in minimal_report or "--mode safe-setup" not in minimal_report:
             print("minimal report should show safe-setup as the default manual command", file=sys.stderr)
+            return 1
+        if not assert_handoff_default(minimal_out, "minimal fixture"):
             return 1
         if (minimal / "AGENTS.md").exists() or (minimal / "docs").exists():
             print("audit mode must not create source harness files", file=sys.stderr)

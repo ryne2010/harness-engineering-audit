@@ -2,7 +2,7 @@
 
 This skill is audit-first. Use OMX to plan and execute auto-approved low-risk changes. Root `AGENTS.md` improvements are P0 when the audit finds missing, stale, oversized, or under-informative instruction surfaces.
 
-Interactive OMX runs should avoid copy/paste. After the audit, select **Plan auto-approved fixes** when offered, or resume later with:
+Interactive OMX runs should avoid copy/paste. After the audit, select the generated default next stage when offered, or resume later with:
 
 ```text
 $harness-engineering-audit continue

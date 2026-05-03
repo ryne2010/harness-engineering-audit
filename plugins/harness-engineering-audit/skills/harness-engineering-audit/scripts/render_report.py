@@ -1058,8 +1058,11 @@ AGENTS.md remediation is the first auto-approved harness-engineering lane.
 
 
 def render_omx_handoff(inventory: Dict[str, Any], scorecard: Dict[str, Any], paths: Dict[str, str]) -> str:
-    next_decision = next_step_decision_for(inventory, scorecard)
-    next_stage_label = stage_label(next_decision["default_stage"])
+    next_step = render_next_step_json(paths, inventory, scorecard)
+    next_decision = next_step["decision"]
+    next_stage = default_stage_entry(next_step)
+    next_stage_label = next_stage.get("label", stage_label(next_decision["default_stage"]))
+    next_stage_command = next_stage.get("command", prompt_command("$ralplan", paths["ralplan_prompt"]))
     return f"""# OMX Handoff: Harness Engineering Audit
 
 Audit report path:
@@ -1116,10 +1119,10 @@ Reason: {next_decision["reason"]}
 15. `.omx/**` if present
 16. docs indexes / validation docs / doc gardening surfaces referenced in the report
 
-## Suggested `$ralplan` (default)
+## Suggested default: {next_stage_label}
 
 ```text
-{prompt_command('$ralplan', paths['ralplan_prompt'])}
+{next_stage_command}
 ```
 
 ## Suggested `$ralplan` for Symphony adoption

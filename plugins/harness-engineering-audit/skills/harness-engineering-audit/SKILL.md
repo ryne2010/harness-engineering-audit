@@ -294,7 +294,7 @@ After the audit script runs:
 1. Read `report.md` enough to present the summary required below.
 2. Use `next-step.json` / `next-step.md` to identify the default next stage.
 3. In an interactive OMX runtime, present a structured selection:
-   - **Plan auto-approved fixes** (default/recommended)
+   - the generated default next stage from `next-step.json` (default/recommended)
    - **Execute auto-approved fixes** (only if an execution-ready plan already exists)
    - **Review risky questions** (only for medium/high-risk ambiguity)
    - **Stop after audit**

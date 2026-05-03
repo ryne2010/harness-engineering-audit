@@ -127,7 +127,11 @@ The audit replaces the previous generated report set at:
     tool-upgrade-ralplan.md
 ```
 
-Use the generated handoff with OMX. In an interactive OMX run, the skill should present **Plan auto-approved fixes** as the default selection so you do not need to copy/paste the long prompt. To resume later, type only:
+Use the generated handoff with OMX. In an interactive OMX run, the skill should present the generated default next stage from `next-step.json` so you do not need to copy/paste a long prompt. To resume later, type only:
+
+```text
+$harness-engineering-audit continue
+```
 
 Upgrade recommendations are report-only by default: tools are recommended, follow-up web verification is requested, human approval is required, and the audit never executes install/config commands or claims local-script web verification.
 
@@ -142,10 +146,6 @@ python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode f
 ```
 
 The default `--mode audit` remains report-only. `safe-setup` creates docs-only lane packs under `docs/harness/**` and never creates `.codex/agents`. Stack lanes include activation confidence and recommendation policy fields so weak layout signals can remain advisory instead of inflating missing-lane work. `full-orchestration` is explicit opt-in for project custom-agent TOML and stronger orchestration contracts; it still does not spawn agents or execute live commands. `--force` remains only the output-directory overwrite flag.
-
-```text
-$harness-engineering-audit continue
-```
 
 Manual commands are still generated for portability:
 

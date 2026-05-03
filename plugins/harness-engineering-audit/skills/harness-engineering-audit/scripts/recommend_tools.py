@@ -10,6 +10,9 @@ from typing import Any, Dict, List
 
 SCHEMA = "harness.upgrade-recommendations.v1"
 QUEUE_SCHEMA = "harness.web-verification-queue.v1"
+TOOL_CATALOG_SCHEMA = "harness.tool-catalog.v1"
+SKILL_DIR = Path(__file__).resolve().parents[1]
+TOOL_CATALOG_PATH = SKILL_DIR / "assets" / "tool-catalog.json"
 DEFAULT_POLICY = {
     "recommend_tools": True,
     "web_requested": True,
@@ -26,144 +29,54 @@ SOURCE_TRUST_POLICY = {
     "blocked": "Unsafe or blocked source; do not recommend.",
 }
 NATIVE_SUPPRESSIBLE_IDS = {"codex-mcp", "omx-native-workflows", "codex-agents-md"}
+CATALOG_REQUIRED_KEYS = {
+    "id",
+    "name",
+    "capabilities",
+    "stack_tags",
+    "source_url",
+    "source_owner",
+    "trust_tier",
+    "last_reviewed",
+    "install_commands",
+    "config_commands",
+    "validation_commands",
+    "rollback_commands",
+}
 
-SEED_CATALOG = [
-    {
-        "id": "codex-agents-md",
-        "name": "AGENTS.md guidance",
-        "capabilities": ["agent instructions", "repo guidance"],
-        "stack_tags": ["codex-ready", "docs-heavy"],
-        "source_url": "https://developers.openai.com/codex/guides/agents-md",
-        "source_owner": "OpenAI",
-        "trust_tier": "tier0-official",
-        "last_reviewed": "2026-05-02",
-        "license_hint": None,
-        "install_commands": [],
-        "config_commands": ["Edit AGENTS.md after approval; keep it concise and map-like."],
-        "validation_commands": ["Review generated harness audit report and run documented repo validation."],
-        "rollback_commands": ["git checkout -- AGENTS.md"],
-    },
-    {
-        "id": "codex-mcp",
-        "name": "Codex MCP integration",
-        "capabilities": ["external context", "tool integration"],
-        "stack_tags": ["codex-ready", "mcp-server-or-client"],
-        "source_url": "https://developers.openai.com/codex/mcp",
-        "source_owner": "OpenAI",
-        "trust_tier": "tier0-official",
-        "last_reviewed": "2026-05-02",
-        "license_hint": None,
-        "install_commands": [],
-        "config_commands": ["Add scoped MCP config only after purpose, owner, auth, and rollback are approved."],
-        "validation_commands": ["codex mcp list || true"],
-        "rollback_commands": ["Remove the approved MCP entry from .codex/config.toml"],
-    },
-    {
-        "id": "omx-native-workflows",
-        "name": "OMX native workflows",
-        "capabilities": ["planning", "team orchestration", "verification", "trace", "memory"],
-        "stack_tags": ["omx-enabled"],
-        "source_url": "https://github.com/ryne2010/oh-my-codex",
-        "source_owner": "oh-my-codex",
-        "trust_tier": "tier1-high-trust",
-        "last_reviewed": "2026-05-02",
-        "license_hint": None,
-        "install_commands": [],
-        "config_commands": ["Prefer existing OMX workflows before adding external orchestration tooling."],
-        "validation_commands": ["omx status || true"],
-        "rollback_commands": ["No repo mutation required for recommendation-only use."],
-    },
-    {
-        "id": "pytest",
-        "name": "pytest",
-        "capabilities": ["python tests", "test discovery"],
-        "stack_tags": ["python"],
-        "source_url": "https://docs.pytest.org/",
-        "source_owner": "pytest-dev",
-        "trust_tier": "tier1-high-trust",
-        "last_reviewed": "2026-05-02",
-        "license_hint": "MIT",
-        "install_commands": ["python -m pip install pytest"],
-        "config_commands": ["Add pytest configuration only after approval."],
-        "validation_commands": ["python -m pytest"],
-        "rollback_commands": ["python -m pip uninstall pytest"],
-    },
-    {
-        "id": "playwright",
-        "name": "Playwright",
-        "capabilities": ["browser e2e", "frontend runtime validation"],
-        "stack_tags": ["frontend-web", "react-app", "nextjs-app", "vue-app", "svelte-app", "angular-app"],
-        "source_url": "https://playwright.dev/",
-        "source_owner": "Microsoft Playwright",
-        "trust_tier": "tier1-high-trust",
-        "last_reviewed": "2026-05-02",
-        "license_hint": "Apache-2.0",
-        "install_commands": ["npm init playwright@latest"],
-        "config_commands": ["Add Playwright config and tests only after approval."],
-        "validation_commands": ["npx playwright test"],
-        "rollback_commands": ["Remove Playwright config/tests and package entries from the approved diff."],
-    },
-    {
-        "id": "shadcn-ui",
-        "name": "shadcn/ui",
-        "capabilities": ["ui component workflow", "design-system scaffolding"],
-        "stack_tags": ["shadcn-ui", "tailwind", "react-app", "nextjs-app"],
-        "source_url": "https://ui.shadcn.com/",
-        "source_owner": "shadcn",
-        "trust_tier": "tier1-high-trust",
-        "last_reviewed": "2026-05-02",
-        "license_hint": "MIT",
-        "install_commands": ["npx shadcn@latest init"],
-        "config_commands": ["Run shadcn init/add only after approval because it mutates source/config."],
-        "validation_commands": ["npm run lint", "npm test"],
-        "rollback_commands": ["Revert generated components/config from the approved diff."],
-    },
-    {
-        "id": "figma-mcp",
-        "name": "Figma MCP/server integration",
-        "capabilities": ["design-source integration", "design context"],
-        "stack_tags": ["figma-driven", "design-system"],
-        "source_url": "https://help.figma.com/",
-        "source_owner": "Figma",
-        "trust_tier": "tier0-official",
-        "last_reviewed": "2026-05-02",
-        "license_hint": None,
-        "install_commands": [],
-        "config_commands": ["Add Figma integration only after token scope and MCP trust review."],
-        "validation_commands": ["Confirm Figma MCP/tool access with least-privilege credentials."],
-        "rollback_commands": ["Remove Figma MCP config and revoke related tokens."],
-    },
-    {
-        "id": "openapi-generator",
-        "name": "OpenAPI Generator",
-        "capabilities": ["api client/server generation", "contract workflow"],
-        "stack_tags": ["openapi"],
-        "source_url": "https://openapi-generator.tech/",
-        "source_owner": "OpenAPI Generator",
-        "trust_tier": "tier1-high-trust",
-        "last_reviewed": "2026-05-02",
-        "license_hint": "Apache-2.0",
-        "install_commands": ["Use an approved package-manager or container invocation for openapi-generator."],
-        "config_commands": ["Add generation config only after approving generated artifact lifecycle."],
-        "validation_commands": ["Run existing API/client tests after generation."],
-        "rollback_commands": ["Remove generated files/config from the approved diff."],
-    },
-    {
-        "id": "docker-official",
-        "name": "Docker official tooling",
-        "capabilities": ["container validation", "runtime parity"],
-        "stack_tags": ["docker"],
-        "source_url": "https://docs.docker.com/",
-        "source_owner": "Docker",
-        "trust_tier": "tier0-official",
-        "last_reviewed": "2026-05-02",
-        "license_hint": None,
-        "install_commands": [],
-        "config_commands": ["Add/modify Docker files only after runtime ownership approval."],
-        "validation_commands": ["docker build ."],
-        "rollback_commands": ["Revert Dockerfile/compose changes from the approved diff."],
-    },
-]
+
+def load_tool_catalog(path: Path = TOOL_CATALOG_PATH) -> List[Dict[str, Any]]:
+    catalog = json.loads(path.read_text(encoding="utf-8"))
+    if catalog.get("schema") != TOOL_CATALOG_SCHEMA:
+        raise ValueError(f"unexpected tool catalog schema: {catalog.get('schema')}")
+    entries = catalog.get("entries")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("tool catalog must contain entries")
+    seen: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("tool catalog entries must be objects")
+        missing = sorted(CATALOG_REQUIRED_KEYS - set(entry))
+        if missing:
+            raise ValueError(f"tool catalog entry {entry.get('id', '<unknown>')} missing keys: {missing}")
+        entry_id = str(entry["id"])
+        if entry_id in seen:
+            raise ValueError(f"duplicate tool catalog id: {entry_id}")
+        seen.add(entry_id)
+        if entry["trust_tier"] not in SOURCE_TRUST_POLICY:
+            raise ValueError(f"invalid trust tier for {entry_id}: {entry['trust_tier']}")
+        list_fields = [
+            "capabilities",
+            "stack_tags",
+            "install_commands",
+            "config_commands",
+            "validation_commands",
+            "rollback_commands",
+        ]
+        for key in list_fields:
+            if not isinstance(entry.get(key), list):
+                raise ValueError(f"tool catalog entry {entry_id} field {key} must be a list")
+    return entries
 
 
 def _tag_set(stack_inventory: Dict[str, Any]) -> set[str]:
@@ -198,14 +111,16 @@ def generate_recommendations(
     tool_inventory: Dict[str, Any],
     recommend_tools: bool = True,
     web_requested: bool = True,
+    catalog_entries: List[Dict[str, Any]] | None = None,
 ) -> Dict[str, Any]:
     tags = _tag_set(stack_inventory)
+    catalog_entries = list(catalog_entries) if catalog_entries is not None else load_tool_catalog()
     recommendations: List[Dict[str, Any]] = []
     suppressions: List[Dict[str, Any]] = []
     queue: List[Dict[str, Any]] = []
 
     if recommend_tools:
-        for entry in SEED_CATALOG:
+        for entry in catalog_entries:
             if not tags.intersection(set(entry.get("stack_tags", []))):
                 continue
             source = _base_source(entry, web_requested=web_requested)
@@ -290,7 +205,7 @@ def generate_recommendations(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "policy": dict(DEFAULT_POLICY, recommend_tools=recommend_tools, web_requested=web_requested),
         "source_trust_policy": SOURCE_TRUST_POLICY,
-        "catalog_last_reviewed": max(entry["last_reviewed"] for entry in SEED_CATALOG),
+        "catalog_last_reviewed": max(entry["last_reviewed"] for entry in catalog_entries),
         "recommendations": recommendations,
         "suppressions": suppressions,
         "web_verification_queue": {

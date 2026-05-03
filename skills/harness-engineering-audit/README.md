@@ -96,7 +96,7 @@ python3 .agents/skills/harness-engineering-audit/scripts/run_audit.py . --mode f
 
 1. Run the audit.
 2. Review `.codex/reports/harness-engineering-audit/report.md`.
-3. In OMX, select **Plan auto-approved fixes** when offered, or resume later with `$harness-engineering-audit continue`.
+3. In OMX, select the generated default next stage when offered, or resume later with `$harness-engineering-audit continue`.
 4. Use `$team` to execute auto-approved low-risk fixes, with `AGENTS.md` first.
 5. Use `$ralph` to verify validation evidence and residual risk.
 

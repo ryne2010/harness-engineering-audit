@@ -2,7 +2,7 @@
 
 The skill is audit-first. The audit script itself does not modify repo source files, but low-risk findings are auto-approved for the follow-up OMX execution pass. Root `AGENTS.md` improvements are P0 when the audit finds missing, stale, oversized, or under-informative instruction surfaces.
 
-Interactive OMX runs should avoid copy/paste: after the audit, select **Plan auto-approved fixes** when the skill offers the next-stage choice. To resume later, type:
+Interactive OMX runs should avoid copy/paste: after the audit, select the generated default next stage from `next-step.json` when the skill offers the next-stage choice. To resume later, type:
 
 ```text
 $harness-engineering-audit continue

@@ -45,7 +45,7 @@ Recommended flow:
 2. Read `report.md`, `findings.md`, and `recommended-fixes.md`.
 3. Read `agents-priority.md` for the P0 AGENTS.md lane.
 4. Review `upgrade-recommendations.md` and `source-trust-policy.md` before considering any tooling changes.
-5. In OMX, select **Plan auto-approved fixes** when offered, or resume later with `$harness-engineering-audit continue`.
+5. In OMX, select the generated default next stage when offered, or resume later with `$harness-engineering-audit continue`.
 6. Use `$team` / `$ralph` to execute and verify auto-approved low-risk fixes.
 
 The long workflow prompts are stored under `prompts/` so OMX can continue without requiring copy/paste.
