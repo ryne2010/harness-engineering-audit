@@ -17,6 +17,59 @@ LANE_CATALOG = REPO_ROOT / "skills" / "harness-engineering-audit" / "assets" / "
 SKILL_SCRIPTS = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts"
 
 
+def assert_recommendation_contract(score: dict, label: str) -> bool:
+    recs = score.get("recommendations", {})
+    buckets = [
+        ("low_risk", recs.get("low_risk", []) or []),
+        ("medium_risk", recs.get("medium_risk", []) or []),
+        ("high_risk", recs.get("high_risk", []) or []),
+    ]
+    seen_ids = set()
+    for bucket_name, bucket in buckets:
+        for rec in bucket:
+            missing = [
+                key
+                for key in {"id", "source", "dimension", "title", "detail", "risk", "approval", "actionability", "auto_approved"}
+                if key not in rec
+            ]
+            if missing:
+                print(f"{label} recommendation in {bucket_name} missing {missing}: {rec}", file=sys.stderr)
+                return False
+            if rec["id"] in seen_ids:
+                print(f"{label} duplicate recommendation id: {rec['id']}", file=sys.stderr)
+                return False
+            seen_ids.add(rec["id"])
+            if bucket_name == "low_risk" and (rec.get("risk") != "low" or rec.get("approval") != "auto-approved" or not rec.get("auto_approved")):
+                print(f"{label} low-risk recommendation contract invalid: {rec}", file=sys.stderr)
+                return False
+            if bucket_name == "medium_risk" and (rec.get("risk") != "medium" or rec.get("approval") != "review-required" or rec.get("auto_approved")):
+                print(f"{label} medium-risk recommendation contract invalid: {rec}", file=sys.stderr)
+                return False
+            if bucket_name == "high_risk" and (rec.get("risk") != "high" or rec.get("approval") != "explicit-approval-required" or rec.get("auto_approved")):
+                print(f"{label} high-risk recommendation contract invalid: {rec}", file=sys.stderr)
+                return False
+    summary = score.get("recommendation_summary", {})
+    expected_counts = {
+        "low_risk": len(recs.get("low_risk", []) or []),
+        "medium_risk": len(recs.get("medium_risk", []) or []),
+        "high_risk": len(recs.get("high_risk", []) or []),
+    }
+    for key, expected in expected_counts.items():
+        if summary.get(key) != expected:
+            print(f"{label} recommendation summary {key} mismatch: {summary} expected {expected}", file=sys.stderr)
+            return False
+    if summary.get("total") != sum(expected_counts.values()):
+        print(f"{label} recommendation summary total mismatch: {summary}", file=sys.stderr)
+        return False
+    if summary.get("auto_approved") != expected_counts["low_risk"]:
+        print(f"{label} recommendation summary auto-approved mismatch: {summary}", file=sys.stderr)
+        return False
+    if summary.get("schema") != "harness-engineering-audit.recommendation-summary.v1":
+        print(f"{label} recommendation summary schema invalid: {summary}", file=sys.stderr)
+        return False
+    return True
+
+
 def main() -> int:
     if not RUN_AUDIT.exists():
         print(f"missing run_audit.py at {RUN_AUDIT}", file=sys.stderr)
@@ -252,6 +305,8 @@ def main() -> int:
         if score.get("score_schema_version") != "2":
             print(f"scorecard missing score_schema_version=2: {score.get('score_schema_version')}", file=sys.stderr)
             return 1
+        if not assert_recommendation_contract(score, "main fixture"):
+            return 1
         if score.get("lifecycle", {}).get("classification") not in {"greenfield-bootstrap", "brownfield-cleanup", "mature-audit"}:
             print(f"scorecard missing lifecycle classification: {score.get('lifecycle')}", file=sys.stderr)
             return 1
@@ -370,6 +425,13 @@ def main() -> int:
         next_step = json.loads((out / "next-step.json").read_text(encoding="utf-8"))
         if next_step.get("default_stage") != "ralplan":
             print("next-step default_stage should be ralplan", file=sys.stderr)
+            return 1
+        decision = next_step.get("decision", {})
+        if decision.get("default_stage") != next_step.get("default_stage") or not decision.get("reason"):
+            print(f"next-step decision missing or inconsistent: {next_step}", file=sys.stderr)
+            return 1
+        if decision.get("review_required", 0) != score.get("recommendation_summary", {}).get("review_required", 0):
+            print(f"next-step decision count mismatch: {decision}", file=sys.stderr)
             return 1
         if not next_step.get("agents_priority"):
             print("next-step missing agents_priority", file=sys.stderr)
@@ -616,6 +678,8 @@ def main() -> int:
         minimal_inventory = json.loads((minimal_out / "inventory.json").read_text(encoding="utf-8"))
         minimal_score = json.loads((minimal_out / "scorecard.json").read_text(encoding="utf-8"))
         minimal_next = json.loads((minimal_out / "next-step.json").read_text(encoding="utf-8"))
+        if not assert_recommendation_contract(minimal_score, "minimal fixture"):
+            return 1
         if minimal_inventory.get("lifecycle", {}).get("classification") != "greenfield-bootstrap":
             print(f"minimal repo should be greenfield-bootstrap: {minimal_inventory.get('lifecycle')}", file=sys.stderr)
             return 1
@@ -624,6 +688,10 @@ def main() -> int:
             return 1
         if minimal_next.get("default_stage") != "safe-setup":
             print(f"minimal repo default_stage should be safe-setup: {minimal_next}", file=sys.stderr)
+            return 1
+        minimal_decision = minimal_next.get("decision", {})
+        if minimal_decision.get("default_stage") != "safe-setup" or "Greenfield" not in minimal_decision.get("reason", ""):
+            print(f"minimal next-step decision should explain safe setup: {minimal_next}", file=sys.stderr)
             return 1
         if (minimal / "AGENTS.md").exists() or (minimal / "docs").exists():
             print("audit mode must not create source harness files", file=sys.stderr)

@@ -13,6 +13,10 @@ from recommend_tools import DEFAULT_POLICY, QUEUE_SCHEMA, SOURCE_TRUST_POLICY
 REPORT_MARKER = ".harness_engineering_audit_report_dir"
 PROMPT_DIR = "prompts"
 NEXT_STEP_FILE = "next-step.json"
+STAGE_LABELS = {
+    "safe-setup": "Run safe setup",
+    "ralplan": "Plan auto-approved fixes",
+}
 
 
 def safe_prepare_output_dir(out_dir: Path, force: bool = False) -> None:
@@ -107,6 +111,10 @@ def build_path_context(inventory: Dict[str, Any], out_dir: Path) -> Dict[str, st
 
 def prompt_command(skill: str, prompt_path: str) -> str:
     return f'{skill} "Read {prompt_path} and follow it."'
+
+
+def stage_label(stage: str) -> str:
+    return STAGE_LABELS.get(stage, stage)
 
 
 def score_table(scorecard: Dict[str, Any]) -> str:
@@ -284,18 +292,65 @@ Plan only. Do not install, configure, mutate source, or run generated install co
     raise ValueError(f"unknown stage: {stage}")
 
 
-def default_stage_for(inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
+def recommendation_summary_for(scorecard: Dict[str, Any]) -> Dict[str, Any]:
+    recs = scorecard.get("recommendations", {}) or {}
+    summary = dict(scorecard.get("recommendation_summary", {}) or {})
+    low_risk = recs.get("low_risk", []) or []
+    medium = recs.get("medium_risk", []) or []
+    high = recs.get("high_risk", []) or []
+    all_recs = low_risk + medium + high
+    summary["low_risk"] = len(low_risk)
+    summary["medium_risk"] = len(medium)
+    summary["high_risk"] = len(high)
+    summary["total"] = len(all_recs)
+    summary["auto_approved"] = sum(1 for rec in all_recs if rec.get("auto_approved"))
+    summary["review_required"] = sum(1 for rec in all_recs if rec.get("approval") == "review-required")
+    summary["explicit_approval_required"] = sum(1 for rec in all_recs if rec.get("approval") == "explicit-approval-required")
+    summary["p0"] = sum(1 for rec in all_recs if str(rec.get("priority", "")).lower() == "p0")
+    return summary
+
+
+def next_step_decision_for(inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> Dict[str, Any]:
     lifecycle = (inventory.get("lifecycle", {}) or {}).get("classification")
-    low_risk = scorecard.get("recommendations", {}).get("low_risk", []) or []
-    medium = scorecard.get("recommendations", {}).get("medium_risk", []) or []
-    high = scorecard.get("recommendations", {}).get("high_risk", []) or []
-    if lifecycle == "greenfield-bootstrap" and low_risk and not medium and not high:
-        return "safe-setup"
-    return "ralplan"
+    summary = recommendation_summary_for(scorecard)
+    review_required = int(summary.get("review_required", 0) or 0)
+    explicit_required = int(summary.get("explicit_approval_required", 0) or 0)
+    low_count = int(summary.get("low_risk", 0) or 0)
+    medium_count = int(summary.get("medium_risk", 0) or 0)
+    high_count = int(summary.get("high_risk", 0) or 0)
+    all_actionable_low_risk = low_count > 0 and medium_count == 0 and high_count == 0 and review_required == 0 and explicit_required == 0
+    has_approval_gates = bool(review_required or explicit_required or medium_count or high_count)
+    if lifecycle == "greenfield-bootstrap" and all_actionable_low_risk:
+        default_stage = "safe-setup"
+        reason = "Greenfield repo with only auto-approved low-risk harness setup findings."
+    elif has_approval_gates:
+        default_stage = "ralplan"
+        reason = "Review-required or explicit-approval findings exist, so planning is the conservative default."
+    else:
+        default_stage = "ralplan"
+        reason = "Brownfield or mature repo: plan the auto-approved cleanup before execution."
+    return {
+        "default_stage": default_stage,
+        "reason": reason,
+        "lifecycle": lifecycle or "unknown",
+        "low_risk": low_count,
+        "medium_risk": medium_count,
+        "high_risk": high_count,
+        "auto_approved": int(summary.get("auto_approved", 0) or 0),
+        "review_required": review_required,
+        "explicit_approval_required": explicit_required,
+        "p0": int(summary.get("p0", 0) or 0),
+        "denoise_policy": "Recommended next step is derived only from normalized actionable recommendations; advisory lanes and approval-gated tool upgrades do not make setup modes the default.",
+    }
+
+
+def default_stage_for(inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
+    return next_step_decision_for(inventory, scorecard)["default_stage"]
 
 
 def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> Dict[str, Any]:
-    default_stage = default_stage_for(inventory, scorecard)
+    decision = next_step_decision_for(inventory, scorecard)
+    default_stage = decision["default_stage"]
     repo_root = paths["repo_root"]
     stages = [
         {
@@ -406,17 +461,21 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
         "repo_root": repo_root,
         "agents_priority": paths["agents_priority"],
         "omx_handoff": paths["omx_handoff"],
+        "decision": decision,
         "stages": stages,
     }
 
 
 def render_next_step_markdown(paths: Dict[str, str], inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
     next_step = render_next_step_json(paths, inventory, scorecard)
+    decision = next_step["decision"]
     default_label = next((stage["label"] for stage in next_step["stages"] if stage["stage"] == next_step["default_stage"]), "Plan auto-approved fixes")
     lines = [
         "# Harness Engineering Audit: Next Step",
         "",
         f"Default next stage: **{default_label}**.",
+        "",
+        f"Reason: {decision['reason']}",
         "",
         "Low-risk findings are auto-approved for the follow-up execution pass. AGENTS.md improvements are P0 and should be planned/executed first. Medium/high-risk findings still require explicit approval.",
         "",
@@ -819,6 +878,8 @@ def render_main_report(
     doc_gardening = inventory.get("doc_gardening_readiness", {})
     marker_counts = inventory.get("markers", {}).get("counts", {})
     total_markers = sum(int(v) for v in marker_counts.values()) if marker_counts else 0
+    next_decision = next_step_decision_for(inventory, scorecard)
+    next_stage_label = stage_label(next_decision["default_stage"])
 
     return f"""# Harness Engineering Audit Report
 
@@ -895,7 +956,8 @@ Read `{paths['agents_priority']}` before planning or execution. Root `AGENTS.md`
 
 Use the generated next-step artifacts instead of retyping long prompts.
 
-- OMX interactive default: select **Plan auto-approved fixes** when the skill presents the follow-up choice.
+- OMX interactive default: select **{next_stage_label}** when the skill presents the follow-up choice.
+- Reason: {next_decision["reason"]}
 - Minimal resume command: `$harness-engineering-audit continue`
 - Next-step index: `{paths['next_step_md']}`
 - Durable prompt files: `{paths['prompts_dir']}/`
@@ -986,6 +1048,8 @@ AGENTS.md remediation is the first auto-approved harness-engineering lane.
 
 
 def render_omx_handoff(inventory: Dict[str, Any], scorecard: Dict[str, Any], paths: Dict[str, str]) -> str:
+    next_decision = next_step_decision_for(inventory, scorecard)
+    next_stage_label = stage_label(next_decision["default_stage"])
     return f"""# OMX Handoff: Harness Engineering Audit
 
 Audit report path:
@@ -1012,7 +1076,9 @@ Overall score: **{scorecard.get('overall_score')}/10** ({scorecard.get('overall_
 
 ## Low-typing next step
 
-Default next stage: **Plan auto-approved fixes**.
+Default next stage: **{next_stage_label}**.
+
+Reason: {next_decision["reason"]}
 
 - In interactive OMX, select the next stage instead of copying a long prompt.
 - If resuming later, type: `$harness-engineering-audit continue`

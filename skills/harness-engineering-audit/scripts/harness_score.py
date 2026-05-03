@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 DIMENSIONS = [
     "Agent Legibility",
@@ -27,6 +28,12 @@ DIMENSIONS = [
     "Symphony Orchestration Readiness",
 ]
 
+RISK_DEFAULTS = {
+    "low": ("auto-approved", True, "auto-approved-follow-up"),
+    "medium": ("review-required", False, "plan-before-execution"),
+    "high": ("explicit-approval-required", False, "explicit-human-approval"),
+}
+
 
 def clamp(score: int) -> int:
     return max(0, min(10, int(score)))
@@ -42,6 +49,150 @@ def status(score: int) -> str:
     if score >= 3:
         return "weak"
     return "missing"
+
+
+def slugify(value: Any, max_len: int = 96) -> str:
+    text = re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-")
+    return (text or "item")[:max_len].strip("-") or "item"
+
+
+def unique_items(items: List[Any]) -> List[Any]:
+    seen = set()
+    output = []
+    for item in items:
+        marker = json.dumps(item, sort_keys=True, default=str) if isinstance(item, (dict, list)) else str(item)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        output.append(item)
+    return output
+
+
+def recommendation_id(rec: Dict[str, Any]) -> str:
+    if rec.get("id"):
+        return slugify(rec["id"], max_len=128)
+    basis = "|".join(
+        str(rec.get(key, ""))
+        for key in ["risk", "category", "title", "detail"]
+        if rec.get(key) is not None
+    )
+    return f"rec-{slugify(basis, max_len=140)}"
+
+
+def normalize_evidence(value: Any) -> List[str]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item)]
+    return [str(value)]
+
+
+def merged_values(*values: Any) -> List[str]:
+    merged: List[str] = []
+    for value in values:
+        merged.extend(normalize_evidence(value))
+    return unique_items(merged)
+
+
+def normalize_recommendation(
+    rec: Dict[str, Any],
+    *,
+    default_dimension: str = "General",
+    source: str = "scorecard",
+    evidence: List[str] | None = None,
+) -> Dict[str, Any]:
+    out = dict(rec)
+    risk = str(out.get("risk", "medium")).lower()
+    if risk not in {"low", "medium", "high"}:
+        risk = "medium"
+    out["risk"] = risk
+    out["dimension"] = str(out.get("dimension") or default_dimension)
+    out["title"] = str(out.get("title") or "Recommendation")
+    out["detail"] = str(out.get("detail") or "")
+    out["source"] = str(out.get("source") or source)
+
+    combined_evidence = normalize_evidence(out.get("evidence")) + normalize_evidence(evidence)
+    if combined_evidence:
+        out["evidence"] = unique_items(combined_evidence)[:10]
+
+    approval, auto_approved, actionability = RISK_DEFAULTS[risk]
+    out["auto_approved"] = auto_approved
+    out["approval"] = approval
+    out.setdefault("actionability", actionability)
+
+    out["id"] = recommendation_id(out)
+    return out
+
+
+def priority_rank(value: Any) -> int:
+    ranks = {"p0": 0, "p1": 1, "p2": 2, "p3": 3}
+    return ranks.get(str(value or "p9").lower(), 9)
+
+
+def recommendation_sort_key(rec: Dict[str, Any]) -> tuple[int, str, str, str]:
+    return (
+        priority_rank(rec.get("priority")),
+        str(rec.get("source", "")),
+        str(rec.get("dimension", "")),
+        str(rec.get("title", "")),
+    )
+
+
+def merge_duplicate_recommendation(existing: Dict[str, Any], new: Dict[str, Any]) -> None:
+    merged_sources = merged_values(
+        existing.get("sources") or existing.get("source"),
+        new.get("sources") or new.get("source"),
+    )
+    existing["source"] = merged_sources[0] if merged_sources else existing.get("source", "scorecard")
+    if len(merged_sources) > 1:
+        existing["sources"] = merged_sources
+
+    merged_dimensions = merged_values(
+        existing.get("related_dimensions") or existing.get("dimension"),
+        new.get("related_dimensions") or new.get("dimension"),
+    )
+    existing["dimension"] = merged_dimensions[0] if merged_dimensions else existing.get("dimension", "General")
+    if len(merged_dimensions) > 1:
+        existing["related_dimensions"] = merged_dimensions
+
+    evidence = merged_values(existing.get("evidence"), new.get("evidence"))
+    if evidence:
+        existing["evidence"] = evidence[:10]
+
+    if priority_rank(new.get("priority")) < priority_rank(existing.get("priority")):
+        existing["priority"] = new.get("priority")
+
+
+def dedupe_recommendations(recs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for rec in recs:
+        normalized = normalize_recommendation(rec)
+        rec_id = normalized["id"]
+        if rec_id in by_id:
+            merge_duplicate_recommendation(by_id[rec_id], normalized)
+        else:
+            by_id[rec_id] = normalized
+    return sorted(by_id.values(), key=recommendation_sort_key)
+
+
+def summarize_recommendations(
+    low_risk: List[Dict[str, Any]],
+    medium_risk: List[Dict[str, Any]],
+    high_risk: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    all_recs = low_risk + medium_risk + high_risk
+    return {
+        "schema": "harness-engineering-audit.recommendation-summary.v1",
+        "low_risk": len(low_risk),
+        "medium_risk": len(medium_risk),
+        "high_risk": len(high_risk),
+        "total": len(all_recs),
+        "auto_approved": sum(1 for rec in all_recs if rec.get("auto_approved")),
+        "review_required": sum(1 for rec in all_recs if rec.get("approval") == "review-required"),
+        "explicit_approval_required": sum(1 for rec in all_recs if rec.get("approval") == "explicit-approval-required"),
+        "p0": sum(1 for rec in all_recs if str(rec.get("priority", "")).lower() == "p0"),
+        "dedupe_policy": "stable recommendation IDs derived from risk/category/title/detail; duplicate sources, dimensions, and evidence are merged.",
+    }
 
 
 def add(score: int, points: int, evidence: List[str], text: str) -> int:
@@ -506,37 +657,35 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     low_risk = []
     medium_risk = []
     high_risk = []
+    recommendation_buckets = {"low": low_risk, "medium": medium_risk, "high": high_risk}
     for d in dims:
-        for rec in d.get("recommendations", []):
-            rec = dict(rec)
-            rec["dimension"] = d["name"]
-            risk = rec.get("risk", "medium")
-            if risk == "low":
-                rec["auto_approved"] = True
-                rec.setdefault("approval", "auto-approved")
-                if "AGENTS" in f"{rec.get('title', '')} {rec.get('detail', '')}" or d["name"] == "Instruction Hygiene":
-                    rec.setdefault("priority", "p0")
-                low_risk.append(rec)
-            elif risk == "high":
-                rec["auto_approved"] = False
-                rec.setdefault("approval", "explicit-approval-required")
-                high_risk.append(rec)
-            else:
-                rec["auto_approved"] = False
-                rec.setdefault("approval", "review-required")
-                medium_risk.append(rec)
+        normalized_recs = []
+        for raw_rec in d.get("recommendations", []):
+            rec = dict(raw_rec)
+            if "AGENTS" in f"{rec.get('title', '')} {rec.get('detail', '')}" or d["name"] == "Instruction Hygiene":
+                rec.setdefault("priority", "p0")
+            normalized = normalize_recommendation(
+                rec,
+                default_dimension=d["name"],
+                source=f"dimension:{slugify(d['name'])}",
+                evidence=(d.get("evidence", []) + d.get("gaps", []))[:4],
+            )
+            normalized_recs.append(normalized)
+            recommendation_buckets[normalized["risk"]].append(normalized)
+        d["recommendations"] = normalized_recs
 
     # Always include a conservative set of potential next steps if weak areas exist.
     if overall < 8 and not low_risk:
-        low_risk.append({
-            "risk": "low",
-            "priority": "p1",
-            "auto_approved": True,
-            "approval": "auto-approved",
-            "dimension": "General",
-            "title": "Create harness-engineering improvement plan",
-            "detail": "Use this audit as input to an OMX ralplan pass, then execute auto-approved low-risk changes without asking for another approval."
-        })
+        low_risk.append(normalize_recommendation(
+            {
+                "risk": "low",
+                "priority": "p1",
+                "dimension": "General",
+                "title": "Create harness-engineering improvement plan",
+                "detail": "Use this audit as input to an OMX ralplan pass, then execute auto-approved low-risk changes without asking for another approval.",
+            },
+            source="fallback",
+        ))
 
     lifecycle_classification = lifecycle.get("classification", "brownfield-cleanup")
     readiness_categories = readiness_registry.get("categories", {}) if isinstance(readiness_registry, dict) else {}
@@ -544,35 +693,42 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     readiness_recommendations = []
     for key, paths in readiness_categories.items():
         if not readiness_status.get(key):
-            readiness_recommendations.append({
-                "category": key,
-                "risk": "low",
-                "auto_approved": True,
-                "approval": "auto-approved",
-                "title": f"Add {key.replace('_', ' ')} guidance",
-                "detail": "Create compact, progressively disclosed harness guidance or templates for this missing readiness category.",
-            })
+            readiness_recommendations.append(normalize_recommendation(
+                {
+                    "category": key,
+                    "risk": "low",
+                    "dimension": "Lifecycle Harness Readiness Registry",
+                    "title": f"Add {key.replace('_', ' ')} guidance",
+                    "detail": "Create compact, progressively disclosed harness guidance or templates for this missing readiness category.",
+                },
+                source="readiness-registry",
+                evidence=paths[:5] if isinstance(paths, list) else [],
+            ))
 
     if lifecycle_classification == "greenfield-bootstrap":
-        low_risk.append({
-            "risk": "low",
-            "priority": "p0",
-            "auto_approved": True,
-            "approval": "auto-approved",
-            "dimension": "Lifecycle",
-            "title": "Run safe setup for production-ready harness skeleton",
-            "detail": "Create compact low-risk harness docs/templates for a minimal repo using progressive disclosure and provenance markers.",
-        })
+        low_risk.append(normalize_recommendation(
+            {
+                "risk": "low",
+                "priority": "p0",
+                "dimension": "Lifecycle",
+                "title": "Run safe setup for production-ready harness skeleton",
+                "detail": "Create compact low-risk harness docs/templates for a minimal repo using progressive disclosure and provenance markers.",
+            },
+            source="lifecycle",
+            evidence=[f"Lifecycle classification: {lifecycle_classification}"],
+        ))
     elif lifecycle_classification == "brownfield-cleanup" and readiness_recommendations:
-        low_risk.append({
-            "risk": "low",
-            "priority": "p1",
-            "auto_approved": True,
-            "approval": "auto-approved",
-            "dimension": "Lifecycle",
-            "title": "Plan safe harness consolidation",
-            "detail": "Add missing low-risk readiness surfaces and produce a cleanup plan for medium/high-risk degraded harness pieces.",
-        })
+        low_risk.append(normalize_recommendation(
+            {
+                "risk": "low",
+                "priority": "p1",
+                "dimension": "Lifecycle",
+                "title": "Plan safe harness consolidation",
+                "detail": "Add missing low-risk readiness surfaces and produce a cleanup plan for medium/high-risk degraded harness pieces.",
+            },
+            source="lifecycle",
+            evidence=[f"Missing readiness categories: {len(readiness_recommendations)}"],
+        ))
 
     lane_recommendations = []
     lane_payload = lane_pack_registry.get("lanes", {}) if isinstance(lane_pack_registry, dict) else {}
@@ -580,26 +736,31 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(lane, dict) or lane.get("status") not in {"missing", "recommended"}:
             continue
         risk = str(lane.get("risk", "low"))
-        rec = {
+        lane_evidence = unique_items(
+            normalize_evidence(lane.get("evidence_paths"))
+            + normalize_evidence(lane.get("activation_evidence_paths"))
+            + normalize_evidence(lane.get("recommendation_reason"))
+        )
+        rec = normalize_recommendation({
             "category": lane_id,
             "risk": risk,
-            "auto_approved": risk == "low",
-            "approval": "auto-approved" if risk == "low" else "review-required",
+            "dimension": "Lane Packs / Grounded Source Of Truth",
             "title": f"Add {lane.get('title', lane_id)} lane pack",
             "detail": (
                 f"Create grounded source-of-truth docs for `{lane_id}`. "
                 "Safe setup writes docs-only lane surfaces; full orchestration is required for custom-agent TOML."
             ),
-        }
+            "actionability": "safe-setup-docs-only" if risk == "low" else "plan-before-execution",
+        }, source="lane-pack-registry", evidence=lane_evidence[:10])
         lane_recommendations.append(rec)
-        routed = dict(rec)
-        routed["dimension"] = "Lane Packs / Grounded Source Of Truth"
-        if risk == "low":
-            low_risk.append(routed)
-        elif risk == "medium":
-            medium_risk.append(routed)
-        else:
-            high_risk.append(routed)
+        recommendation_buckets[rec["risk"]].append(dict(rec))
+
+    low_risk = dedupe_recommendations(low_risk)
+    medium_risk = dedupe_recommendations(medium_risk)
+    high_risk = dedupe_recommendations(high_risk)
+    readiness_recommendations = dedupe_recommendations(readiness_recommendations)
+    lane_recommendations = dedupe_recommendations(lane_recommendations)
+    recommendation_summary = summarize_recommendations(low_risk, medium_risk, high_risk)
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -660,6 +821,7 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
             "agents_priority": "AGENTS.md recommendations are P0 and should be handled before other low-risk fixes.",
             "excluded": "Medium-risk and high-risk recommendations still require explicit approval.",
         },
+        "recommendation_summary": recommendation_summary,
         "recommendations": {
             "low_risk": low_risk,
             "medium_risk": medium_risk,
