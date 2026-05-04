@@ -125,5 +125,35 @@ jobs:
         if: steps.changes.outputs.release_relevant == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh skill publish --tag "${{ steps.version.outputs.tag }}"
+          set -euo pipefail
+
+          publish_log="$RUNNER_TEMP/gh-skill-publish.log"
+
+          for attempt in 1 2 3; do
+            echo "Publishing ${RELEASE_TAG} (attempt ${attempt}/3)..."
+            set +e
+            gh skill publish --tag "$RELEASE_TAG" 2>&1 | tee "$publish_log"
+            publish_status=${PIPESTATUS[0]}
+            set -e
+
+            if [ "$publish_status" -eq 0 ]; then
+              exit 0
+            fi
+
+            if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+              echo "::notice::gh skill publish exited with ${publish_status}, but release ${RELEASE_TAG} exists. Treating publish as complete."
+              exit 0
+            fi
+
+            if [ "$attempt" -lt 3 ]; then
+              sleep_seconds=$((attempt * 10))
+              echo "::warning::gh skill publish failed with ${publish_status}; retrying in ${sleep_seconds}s."
+              sleep "$sleep_seconds"
+            fi
+          done
+
+          echo "::error::gh skill publish failed after 3 attempts and release ${RELEASE_TAG} was not found."
+          cat "$publish_log"
+          exit 1
