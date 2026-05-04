@@ -45,6 +45,17 @@ Generated output:
 
 Each run replaces the previous report directory to avoid stale audit confusion.
 
+When run from an interactive terminal without `--mode`, the script prompts for an audit level:
+
+- `minimal` (default, maps to report-only `audit`)
+- `safe-setup`
+- `force-ideal-harness`
+- `symphony-repo-local`
+- `symphony-live-handoff`
+- `full-orchestration`
+
+Non-interactive runs default to `minimal`/`audit`. Use `--mode minimal` or `--mode audit` to skip the prompt explicitly.
+
 The upgrade recommendation layer is report-only. It requests follow-up web verification, keeps local-script `web_verified` status false, requires human approval for every install/config action, and never mutates source or configuration.
 
 Recommended flow:

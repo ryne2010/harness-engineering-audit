@@ -2,6 +2,8 @@
 """Smoke-test the harness-engineering-audit skill against a temporary repo."""
 from __future__ import annotations
 
+import builtins
+import io
 import json
 import os
 import shutil
@@ -18,6 +20,44 @@ SKILL_SCRIPTS = REPO_ROOT / "skills" / "harness-engineering-audit" / "scripts"
 RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release-skill.yml"
 VALIDATE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "validate.yml"
 MAKEFILE = REPO_ROOT / "Makefile"
+
+
+
+def assert_run_audit_mode_prompt() -> bool:
+    if str(SKILL_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(SKILL_SCRIPTS))
+    import run_audit  # noqa: PLC0415
+
+    if run_audit.mode_from_audit_level("minimal") != "audit":
+        print("minimal audit level should map to report-only audit mode", file=sys.stderr)
+        return False
+    if run_audit.mode_from_audit_level("full-orchestration") != "full-orchestration":
+        print("full-orchestration audit level should map to full-orchestration mode", file=sys.stderr)
+        return False
+    original_input = builtins.input
+    original_stdout = sys.stdout
+    try:
+        sys.stdout = io.StringIO()
+        builtins.input = lambda _prompt="": "full-orchestration"
+        if run_audit.prompt_for_audit_mode() != "full-orchestration":
+            print("prompt should accept full-orchestration by name", file=sys.stderr)
+            return False
+        builtins.input = lambda _prompt="": ""
+        if run_audit.prompt_for_audit_mode() != "audit":
+            print("empty prompt response should default to audit/minimal", file=sys.stderr)
+            return False
+        builtins.input = lambda _prompt="": "1"
+        if run_audit.prompt_for_audit_mode() != "audit":
+            print("first prompt option should be minimal/report-only audit", file=sys.stderr)
+            return False
+        prompt_text = sys.stdout.getvalue()
+        if "full-orchestration" not in prompt_text or "minimal" not in prompt_text:
+            print(f"prompt should list audit levels: {prompt_text}", file=sys.stderr)
+            return False
+    finally:
+        builtins.input = original_input
+        sys.stdout = original_stdout
+    return True
 
 
 def assert_validate_workflow_uses_canonical_target() -> bool:
@@ -331,6 +371,39 @@ def assert_update_patch_availability() -> bool:
                 return False
             check_update.candidate_skill_dirs = original_candidate_skill_dirs
 
+        with tempfile.TemporaryDirectory(prefix="harness-audit-gh-ref-meta-") as td:
+            skill_dir = Path(td) / "harness-engineering-audit"
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                "---\n"
+                "name: test\n"
+                "metadata:\n"
+                "    github-ref: refs/tags/v0.2.37\n"
+                "version: 0.2.0\n"
+                "---\n",
+                encoding="utf-8",
+            )
+            (skill_dir / "release.json").write_text(
+                json.dumps({
+                    "schema": "harness-engineering-audit.release.v1",
+                    "version": "0.2.0",
+                    "tag": "v0.2.0",
+                }),
+                encoding="utf-8",
+            )
+            check_update.candidate_skill_dirs = lambda _repo_or_skill: [skill_dir]
+            gh_ref_match = check_update.check_update(skill_dir)
+            if gh_ref_match.get("status") != "current" or gh_ref_match.get("installed_version") != "0.2.37":
+                print(f"github-ref metadata should override stale release metadata: {gh_ref_match}", file=sys.stderr)
+                return False
+            if not str(gh_ref_match.get("installed_version_source", "")).endswith("#metadata.github-ref"):
+                print(f"github-ref should be the installed version source: {gh_ref_match}", file=sys.stderr)
+                return False
+            if gh_ref_match.get("release_metadata_version") != "0.2.0":
+                print(f"stale release metadata should be recorded: {gh_ref_match}", file=sys.stderr)
+                return False
+            check_update.candidate_skill_dirs = original_candidate_skill_dirs
+
         check_update.latest_release_tag = lambda: ("v0.3.0", None)
         next_line = check_update.check_update(REPO_ROOT)
         if next_line.get("status") != "available" or next_line.get("version_match_strategy") != "newer-release-available":
@@ -440,6 +513,8 @@ def main() -> int:
     if not assert_ignored_runtime_noise_excluded():
         return 1
     if not assert_update_patch_availability():
+        return 1
+    if not assert_run_audit_mode_prompt():
         return 1
     if not assert_validate_workflow_uses_canonical_target():
         return 1

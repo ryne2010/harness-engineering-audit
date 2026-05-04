@@ -102,6 +102,23 @@ def parse_release_metadata(path: Path) -> Optional[str]:
     return str(version).strip() if version else None
 
 
+def github_ref_version(frontmatter: Dict[str, str]) -> Optional[str]:
+    """Return the installed GitHub tag version stamped by `gh skill install`.
+
+    `gh skill install/update` may add package provenance metadata to installed
+    frontmatter without changing the skill's development `version` field.  That
+    provenance is the most accurate local signal for which release tag the user
+    actually installed.
+    """
+    ref = frontmatter.get("github-ref") or frontmatter.get("metadata.github-ref")
+    if not ref:
+        return None
+    tag = ref.rsplit("/", 1)[-1].strip()
+    if not re.match(r"^v?\d+(?:\.\d+)+(?:[-+].*)?$", tag):
+        return None
+    return tag.lstrip("v")
+
+
 def candidate_skill_dirs(repo_or_skill: Path) -> Iterable[Path]:
     script_skill_dir = Path(__file__).resolve().parents[1]
     yield script_skill_dir
@@ -124,11 +141,19 @@ def detect_installed_version(repo_or_skill: Path) -> tuple[Optional[str], Dict[s
         yaml_path = skill_dir / "agents" / "openai.yaml"
         release_path = skill_dir / "release.json"
         details["sources_checked"].append(str(skill_md))
+        frontmatter = parse_frontmatter(read_text(skill_md)) if skill_md.exists() else {}
+        installed_ref_version = github_ref_version(frontmatter)
+        if installed_ref_version:
+            details["version_source"] = f"{skill_md}#metadata.github-ref"
+            release_version = parse_release_metadata(release_path) if release_path.exists() else None
+            if release_version and normalize_version(release_version) != installed_ref_version:
+                details["release_metadata_version"] = release_version
+                details["release_metadata_source"] = str(release_path)
+            return installed_ref_version, details
         release_version = parse_release_metadata(release_path) if release_path.exists() else None
         if release_version:
             details["version_source"] = str(release_path)
             return release_version, details
-        frontmatter = parse_frontmatter(read_text(skill_md)) if skill_md.exists() else {}
         if frontmatter.get("version"):
             details["version_source"] = str(skill_md)
             return frontmatter["version"], details
@@ -242,6 +267,8 @@ def base_result(repo_or_skill: Path) -> Dict[str, Any]:
         "script_package_version": package_version,
         "script_package_version_source": package_source,
         "installed_version_source": installed_details.get("version_source"),
+        "release_metadata_version": installed_details.get("release_metadata_version"),
+        "release_metadata_source": installed_details.get("release_metadata_source"),
         "action_taken": "none",
         "human_approval_required": True,
         "mutates_by_default": False,

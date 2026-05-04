@@ -97,6 +97,17 @@ Always inventory these surfaces when present:
 
 ## Run the audit script
 
+Before running the audit in an interactive session, prompt the user for the audit level and proceed with their selection. Offer these choices:
+
+- `minimal` (default): report-only audit; maps to `--mode audit`.
+- `safe-setup`: create missing low-risk docs/templates only.
+- `force-ideal-harness`: stronger low-risk consolidation; no deletes or CI/config/hooks/security changes.
+- `symphony-repo-local`: repo-local Symphony contracts/templates and inert handoff text.
+- `symphony-live-handoff`: approval-gated handoff text only; no install/config mutation.
+- `full-orchestration`: explicit opt-in lane-pack orchestration contracts and harness custom-agent TOML.
+
+The Python script also prompts for this level when run from an interactive TTY without `--mode`. Non-interactive runs default to `minimal`/`audit` so automation remains stable.
+
 From the repo root after installing this skill, run the script from the installed location.
 
 Project-scoped install:
@@ -158,9 +169,10 @@ python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --out /
 
 ## Execution modes
 
-The script default remains report-only:
+The default prompt choice remains report-only. Use `minimal` or `audit` explicitly when you want to skip the prompt while preserving report-only behavior:
 
 ```bash
+python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --mode minimal
 python3 ~/.codex/skills/harness-engineering-audit/scripts/run_audit.py . --mode audit
 ```
 

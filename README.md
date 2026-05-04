@@ -143,6 +143,8 @@ $harness-engineering-audit continue
 
 Upgrade recommendations are report-only by default: tools are recommended, follow-up web verification is requested, human approval is required, and the audit never executes install/config commands or claims local-script web verification.
 
+When the script runs in an interactive terminal without `--mode`, it prompts for the audit level. The default choice is `minimal`, which maps to report-only `audit`; non-interactive automation also defaults to this report-only level.
+
 Explicit setup modes are available when you want the skill to create low-risk harness infrastructure:
 
 ```bash
@@ -157,7 +159,7 @@ python3 "$AUDIT_SCRIPT" . --mode symphony-live-handoff
 python3 "$AUDIT_SCRIPT" . --mode full-orchestration
 ```
 
-The default `--mode audit` remains report-only. `safe-setup` creates docs-only lane packs under `docs/harness/**` and never creates `.codex/agents`. Stack lanes include activation confidence and recommendation policy fields so weak layout signals can remain advisory instead of inflating missing-lane work. `full-orchestration` is explicit opt-in for project custom-agent TOML and stronger orchestration contracts; it still does not spawn agents or execute live commands. `--force` remains only the output-directory overwrite flag.
+The default `--mode minimal` / `--mode audit` remains report-only. `safe-setup` creates docs-only lane packs under `docs/harness/**` and never creates `.codex/agents`. Stack lanes include activation confidence and recommendation policy fields so weak layout signals can remain advisory instead of inflating missing-lane work. `full-orchestration` is explicit opt-in for project custom-agent TOML and stronger orchestration contracts; it still does not spawn agents or execute live commands. `--force` remains only the output-directory overwrite flag.
 
 Manual commands are still generated for portability:
 
