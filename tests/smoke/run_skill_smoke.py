@@ -54,6 +54,9 @@ def assert_run_audit_mode_prompt() -> bool:
         if "full-orchestration" not in prompt_text or "minimal" not in prompt_text:
             print(f"prompt should list audit levels: {prompt_text}", file=sys.stderr)
             return False
+        if "Side-effect summary" not in prompt_text or "no target source mutation" not in prompt_text:
+            print(f"prompt should explain mode side effects: {prompt_text}", file=sys.stderr)
+            return False
     finally:
         builtins.input = original_input
         sys.stdout = original_stdout
@@ -297,6 +300,7 @@ def assert_ignored_runtime_noise_excluded() -> bool:
     if str(SKILL_SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SKILL_SCRIPTS))
     from harness_inventory import collect_inventory  # noqa: PLC0415
+    from harness_score import score_inventory  # noqa: PLC0415
     from stack_detect import detect_stack  # noqa: PLC0415
 
     with tempfile.TemporaryDirectory(prefix="harness-audit-noise-") as td:
@@ -309,9 +313,21 @@ def assert_ignored_runtime_noise_excluded() -> bool:
         (repo / ".omx" / "plans").mkdir(parents=True)
         (repo / ".omx" / "plans" / "old.md").write_text("todo scaffold " * 200, encoding="utf-8")
         inventory = collect_inventory(repo)
-        counts = inventory.get("markers", {}).get("counts", {})
+        marker_payload = inventory.get("markers", {})
+        counts = marker_payload.get("counts", {})
         if any(counts.get(marker, 0) for marker in {"legacy", "stage", "temporary", "preview", "todo", "scaffold"}):
             print(f"ignored runtime/history noise should not affect marker counts: {inventory.get('markers')}", file=sys.stderr)
+            return False
+        if not marker_payload.get("raw_counts") or not marker_payload.get("excluded_counts") or not marker_payload.get("excluded_affected_files"):
+            print(f"runtime marker noise should be preserved as raw/excluded evidence: {marker_payload}", file=sys.stderr)
+            return False
+        if marker_payload.get("actionable_affected_files"):
+            print(f"runtime marker noise should not be actionable entropy: {marker_payload}", file=sys.stderr)
+            return False
+        score = score_inventory(inventory)
+        entropy_dim = next((d for d in score.get("dimensions", []) if d.get("name") == "Entropy / Scaffolding Control"), {})
+        if entropy_dim.get("score", 0) < 8:
+            print(f"generated/runtime-only marker noise should not force weak entropy score: {entropy_dim}", file=sys.stderr)
             return False
         stack = detect_stack(repo, inventory)
         evidence = "\n".join(
@@ -548,6 +564,18 @@ def main() -> int:
             "# Doc Gardening\n\nRaw sources are immutable. Generated synthesis pages are refreshed during ingest/query/lint docs workflows. Check for stale claims, contradictions, orphan pages, broken links, missing cross-references, and docs search coverage.\n",
             encoding="utf-8",
         )
+        (repo / "docs" / "entropy").mkdir(parents=True)
+        for index in range(55):
+            (repo / "docs" / "entropy" / f"hotspot-{index:02d}.md").write_text(
+                "# Active entropy hotspot\n\n"
+                "This active doc still references a legacy scaffold placeholder and milestone cleanup note.\n",
+                encoding="utf-8",
+            )
+        (repo / ".tmp" / "generated-noise").mkdir(parents=True)
+        (repo / ".tmp" / "generated-noise" / "markers.md").write_text(
+            ("legacy scaffold placeholder demo fallback milestone temporary preview todo " * 80),
+            encoding="utf-8",
+        )
         (repo / "raw").mkdir()
         (repo / "docs" / "knowledge").mkdir()
         (repo / "internal" / "adr").mkdir(parents=True)
@@ -735,6 +763,20 @@ def main() -> int:
             print(result.stdout)
             print(result.stderr, file=sys.stderr)
             return result.returncode
+        for expected_stdout in [
+            "Mode: audit",
+            "Report:",
+            "Next step:",
+            "Default OMX next stage:",
+            "Mode side effects: report-only audit artifacts",
+            "Target source mutation: no (report-only audit; target source files were not mutated)",
+            "Tool recommendations:",
+            "no install/config commands executed",
+            "Approval state:",
+        ]:
+            if expected_stdout not in result.stdout:
+                print(f"audit stdout missing UX status `{expected_stdout}`:\n{result.stdout}", file=sys.stderr)
+                return 1
 
         out = repo / ".codex" / "reports" / "harness-engineering-audit"
         if legacy_default_file.exists():
@@ -855,14 +897,50 @@ def main() -> int:
             return 1
         report_text = (out / "report.md").read_text(encoding="utf-8")
         markers = inventory.get("markers", {})
-        affected_marker_files = len(markers.get("affected_files", []))
-        raw_marker_hits = sum(int(v) for v in (markers.get("counts") or {}).values())
+        for key in {"raw_counts", "raw_affected_files", "actionable_counts", "actionable_affected_files", "excluded_counts", "excluded_affected_files", "matching_policy"}:
+            if key not in markers:
+                print(f"markers missing denoised/actionable key {key}: {markers}", file=sys.stderr)
+                return 1
+        affected_marker_files = len(markers.get("actionable_affected_files", markers.get("affected_files", [])))
+        raw_marker_files = len(markers.get("raw_affected_files", []))
+        excluded_marker_files = len(markers.get("excluded_affected_files", []))
+        raw_marker_hits = sum(int(v) for v in (markers.get("raw_counts") or {}).values())
+        actionable_marker_hits = sum(int(v) for v in (markers.get("actionable_counts") or {}).values())
+        if affected_marker_files < 50 or raw_marker_files <= affected_marker_files or excluded_marker_files == 0:
+            print(f"main fixture should exercise actionable plus excluded entropy: {markers}", file=sys.stderr)
+            return 1
         if f"Scaffold/legacy marker affected files: {affected_marker_files}" not in report_text:
             print("report should show denoised scaffold marker affected-file count", file=sys.stderr)
             return 1
-        if raw_marker_hits != affected_marker_files and f"Scaffold/legacy marker hits: {raw_marker_hits}" in report_text:
-            print("report should not expose raw scaffold marker hit count", file=sys.stderr)
+        if f"Raw scaffold/legacy marker affected files: {raw_marker_files} file(s) ({raw_marker_hits} hit(s))" not in report_text:
+            print("report should show raw scaffold marker evidence separately", file=sys.stderr)
             return 1
+        if f"Excluded/generated scaffold marker affected files: {excluded_marker_files} file(s)" not in report_text:
+            print("report should show excluded/generated scaffold marker evidence separately", file=sys.stderr)
+            return 1
+        if raw_marker_hits <= actionable_marker_hits:
+            print(f"raw entropy should exceed actionable entropy because generated/runtime noise is excluded: {markers}", file=sys.stderr)
+            return 1
+        entropy_dim = next((d for d in score.get("dimensions", []) if d.get("name") == "Entropy / Scaffolding Control"), {})
+        entropy_recs = entropy_dim.get("recommendations", [])
+        if not any("actionable entropy cleanup" in rec.get("title", "").lower() for rec in entropy_recs):
+            print(f"weak/moderate entropy should produce concrete cleanup recommendation: {entropy_dim}", file=sys.stderr)
+            return 1
+        recommended_fixes_text = (out / "recommended-fixes.md").read_text(encoding="utf-8")
+        if "Plan actionable entropy cleanup" not in recommended_fixes_text:
+            print("recommended fixes should expose actionable entropy cleanup path", file=sys.stderr)
+            return 1
+        for required_report_text in [
+            "## Mode, Side Effects, and Approval State",
+            "### What happened",
+            "### What did not happen",
+            "### What needs approval",
+            "Tool recommendations were summarized as inert planning inputs",
+            "No install/config commands were executed",
+        ]:
+            if required_report_text not in report_text:
+                print(f"report missing mode/tool approval UX text `{required_report_text}`", file=sys.stderr)
+                return 1
         if "Vocabulary / Domain Language Control" not in report_text:
             print("report missing Vocabulary / Domain Language Control section", file=sys.stderr)
             return 1
@@ -919,6 +997,31 @@ def main() -> int:
         if not next_step.get("agents_priority"):
             print("next-step missing agents_priority", file=sys.stderr)
             return 1
+        for key in {"mode_summary", "approval_state", "tool_recommendation_state", "current_step_explanation"}:
+            if key not in next_step:
+                print(f"next-step missing machine-readable UX field {key}: {next_step}", file=sys.stderr)
+                return 1
+        if next_step["mode_summary"].get("mode") != "audit" or not next_step["mode_summary"].get("report_only"):
+            print(f"next-step mode summary should identify report-only audit: {next_step['mode_summary']}", file=sys.stderr)
+            return 1
+        if next_step["approval_state"].get("tool_upgrades_default") is not False or next_step["approval_state"].get("tool_upgrades_approval_required") is not True:
+            print(f"next-step approval state should keep tool upgrades gated/non-default: {next_step['approval_state']}", file=sys.stderr)
+            return 1
+        if next_step["tool_recommendation_state"].get("web_verified") is not False or next_step["tool_recommendation_state"].get("install_config_mutation") is not False:
+            print(f"next-step tool state should preserve report-only tooling policy: {next_step['tool_recommendation_state']}", file=sys.stderr)
+            return 1
+        next_step_text = (out / "next-step.md").read_text(encoding="utf-8")
+        for required_next_text in [
+            "### What happened",
+            "### What did not happen",
+            "### What needs approval",
+            "## Optional approval-gated tool branch",
+            "This branch is visible for planning but is **not** the default",
+            "$harness-engineering-audit continue",
+        ]:
+            if required_next_text not in next_step_text:
+                print(f"next-step.md missing UX text `{required_next_text}`", file=sys.stderr)
+                return 1
         stages = {stage.get("stage") for stage in next_step.get("stages", [])}
         for stage_name in {"safe-setup", "force-ideal-harness", "symphony-repo-local", "symphony-live-handoff"}:
             if stage_name not in stages:
@@ -947,6 +1050,10 @@ def main() -> int:
             return 1
         if "tool-upgrade-ralplan" not in stages:
             print("next-step missing tool-upgrade-ralplan stage", file=sys.stderr)
+            return 1
+        tool_stage = next(stage for stage in next_step.get("stages", []) if stage.get("stage") == "tool-upgrade-ralplan")
+        if tool_stage.get("recommended") or tool_stage.get("approval_required") is not True:
+            print(f"tool upgrade stage should be visible but approval-gated/non-default: {tool_stage}", file=sys.stderr)
             return 1
         if not assert_handoff_default(out, "main fixture"):
             return 1
@@ -1082,9 +1189,28 @@ def main() -> int:
                     print(f"missing lane safe template: {lane_id} {target}", file=sys.stderr)
                     return 1
             for target in lane.get("full_orchestration_targets", []):
-                if not (template_dir / target.get("template", "")).exists():
+                template_path = template_dir / target.get("template", "")
+                if not template_path.exists():
                     print(f"missing lane full template: {lane_id} {target}", file=sys.stderr)
                     return 1
+                template_text = template_path.read_text(encoding="utf-8")
+                if "developer_instructions =" not in template_text or "\ninstructions =" in template_text:
+                    print(f"custom-agent template should use substantive developer_instructions only: {template_path}", file=sys.stderr)
+                    return 1
+                for required_phrase in [
+                    "Operate only when",
+                    "AGENTS.md",
+                    "Lane id:",
+                    "Required read order",
+                    "Primary responsibilities",
+                    "Guardrails",
+                    "Validation and evidence expectations",
+                    "Escalate when",
+                    "Handoff format",
+                ]:
+                    if required_phrase not in template_text:
+                        print(f"custom-agent template missing {required_phrase}: {template_path}", file=sys.stderr)
+                        return 1
                 if target.get("agent_name"):
                     custom_agent_names.append(target["agent_name"])
         if len(custom_agent_names) != len(set(custom_agent_names)) or set(custom_agent_names) & built_in_agent_names:
@@ -1470,17 +1596,50 @@ def main() -> int:
             print("full-orchestration missing generated custom-agent TOML", file=sys.stderr)
             return 1
         seen_agent_names = set()
+        seen_lane_purposes = set()
         for agent_file in generated_agents:
             text = agent_file.read_text(encoding="utf-8")
-            if "Generated by harness-engineering-audit" not in text or "explicitly invoked" not in text:
-                print(f"custom agent missing provenance/explicit invocation language: {agent_file}", file=sys.stderr)
+            if not text.startswith("# Generated by harness-engineering-audit") or text.startswith("<!--"):
+                print(f"custom agent should start with valid TOML provenance comment: {agent_file}", file=sys.stderr)
+                return 1
+            if "developer_instructions =" not in text or "\ninstructions =" in text:
+                print(f"custom agent should use developer_instructions and no short instructions stub: {agent_file}", file=sys.stderr)
+                return 1
+            if len(text) < 1500:
+                print(f"custom agent developer instructions should be substantive: {agent_file}", file=sys.stderr)
+                return 1
+            if "explicitly asked" not in text or "Do not self-activate" not in text:
+                print(f"custom agent missing explicit opt-in language: {agent_file}", file=sys.stderr)
                 return 1
             name_line = next((line for line in text.splitlines() if line.startswith("name = ")), "")
             name = name_line.split("=", 1)[1].strip().strip('"') if name_line else ""
             if not name or name in built_in_agent_names or name in seen_agent_names:
                 print(f"custom agent name invalid: {name} from {agent_file}", file=sys.stderr)
                 return 1
+            description_line = next((line for line in text.splitlines() if line.startswith("description = ")), "")
+            if "explicitly asked" not in description_line:
+                print(f"custom agent description should require explicit invocation: {agent_file}", file=sys.stderr)
+                return 1
+            for required_phrase in [
+                "AGENTS.md",
+                "Lane id:",
+                "Required read order",
+                "Primary responsibilities",
+                "Guardrails",
+                "Validation and evidence expectations",
+                "Escalate when",
+                "Handoff format",
+            ]:
+                if required_phrase not in text:
+                    print(f"custom agent missing required inline section {required_phrase}: {agent_file}", file=sys.stderr)
+                    return 1
+            marker = "Lane purpose: "
+            if marker in text:
+                seen_lane_purposes.add(text.split(marker, 1)[1].split("\\n", 1)[0])
             seen_agent_names.add(name)
+        if len(seen_lane_purposes) < 2:
+            print(f"generated agents should include lane-specific purposes, saw: {seen_lane_purposes}", file=sys.stderr)
+            return 1
         full_manifest = json.loads(setup_manifest_path.read_text(encoding="utf-8"))
         if not any(path.startswith(".codex/agents/") for path in full_manifest.get("created", []) + full_manifest.get("modified", [])):
             print(f"full-orchestration manifest missing custom-agent files: {full_manifest}", file=sys.stderr)

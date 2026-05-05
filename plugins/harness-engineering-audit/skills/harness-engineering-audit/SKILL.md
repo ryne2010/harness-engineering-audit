@@ -99,12 +99,14 @@ Always inventory these surfaces when present:
 
 Before running the audit in an interactive session, prompt the user for the audit level and proceed with their selection. Offer these choices:
 
-- `minimal` (default): report-only audit; maps to `--mode audit`.
-- `safe-setup`: create missing low-risk docs/templates only.
-- `force-ideal-harness`: stronger low-risk consolidation; no deletes or CI/config/hooks/security changes.
-- `symphony-repo-local`: repo-local Symphony contracts/templates and inert handoff text.
-- `symphony-live-handoff`: approval-gated handoff text only; no install/config mutation.
-- `full-orchestration`: explicit opt-in lane-pack orchestration contracts and harness custom-agent TOML.
+| Choice | Side effects | Approval posture |
+| --- | --- | --- |
+| `minimal` (default) / `audit` | Report-only audit; no target source mutation. | Safe default. |
+| `safe-setup` | Create missing low-risk docs/templates only; never creates `.codex/agents`. | Explicit setup selection. |
+| `force-ideal-harness` | Stronger low-risk docs/template consolidation; no deletes or CI/config/hooks/security changes. | Explicit setup selection. |
+| `symphony-repo-local` | Repo-local Symphony contracts/templates and inert handoff text. | Explicit setup selection; live installs still approval-gated. |
+| `symphony-live-handoff` | Approval-gated handoff text in the report directory only; no target source or install/config mutation. | Explicit handoff selection. |
+| `full-orchestration` | Lane-pack orchestration contracts and harness custom-agent TOML; never runs agents or live install/config commands. | Explicit opt-in only; never the default. |
 
 The Python script also prompts for this level when run from an interactive TTY without `--mode`. Non-interactive runs default to `minimal`/`audit` so automation remains stable.
 
@@ -160,6 +162,8 @@ Recommendation defaults are intentionally conservative:
 - write reports: true
 
 Local Python scripts cannot browse. They therefore write a web verification queue and keep `web_verified: false` until a browsing-capable human/agent records evidence. Generated install/config/validation/rollback commands are inert handoff text and must not be executed without explicit approval.
+
+Primary artifacts now include a “What happened / What did not happen / What needs approval” section plus machine-readable `mode_summary`, `approval_state`, `tool_recommendation_state`, and `current_step_explanation` fields in `next-step.json`.
 
 Use a custom output directory only when needed:
 

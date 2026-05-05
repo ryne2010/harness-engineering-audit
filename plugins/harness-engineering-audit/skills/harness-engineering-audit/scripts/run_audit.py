@@ -23,42 +23,49 @@ AUDIT_LEVELS = [
         "mode": "audit",
         "label": "Minimal audit",
         "description": "report-only inventory, scoring, recommendations, and handoff artifacts",
+        "side_effects": "reports only; no target source mutation",
     },
     {
         "key": "audit",
         "mode": "audit",
         "label": "Audit",
         "description": "same report-only mode as minimal; useful for script compatibility",
+        "side_effects": "reports only; no target source mutation",
     },
     {
         "key": "safe-setup",
         "mode": "safe-setup",
         "label": "Safe setup",
         "description": "create missing low-risk docs/templates only",
+        "side_effects": "bounded docs/templates; no .codex/agents",
     },
     {
         "key": "force-ideal-harness",
         "mode": "force-ideal-harness",
         "label": "Force ideal harness",
         "description": "stronger low-risk consolidation; no deletes or CI/config/hooks/security changes",
+        "side_effects": "bounded low-risk docs/templates; no deletes or CI/config/hooks/security changes",
     },
     {
         "key": "symphony-repo-local",
         "mode": "symphony-repo-local",
         "label": "Symphony repo-local",
         "description": "repo-local Symphony contracts/templates and inert handoff text",
+        "side_effects": "repo-local docs/contracts plus inert report handoff; no live install/config mutation",
     },
     {
         "key": "symphony-live-handoff",
         "mode": "symphony-live-handoff",
         "label": "Symphony live handoff",
         "description": "approval-gated handoff text only; no install/config mutation",
+        "side_effects": "report-directory handoff text only; no target source mutation",
     },
     {
         "key": "full-orchestration",
         "mode": "full-orchestration",
         "label": "Full orchestration",
         "description": "explicit opt-in lane-pack orchestration contracts and harness custom-agent TOML",
+        "side_effects": "bounded docs/contracts and .codex/agents TOML; never runs agents or install commands",
     },
 ]
 AUDIT_LEVEL_BY_KEY = {level["key"]: level for level in AUDIT_LEVELS}
@@ -71,10 +78,11 @@ def mode_from_audit_level(value: str) -> str:
 
 def prompt_for_audit_mode() -> str:
     print("Select harness-engineering audit level:")
+    print("Side-effect summary: all modes write report artifacts; only explicit setup modes may write bounded target-repo harness files.")
     selectable = [level for level in AUDIT_LEVELS if level["key"] != "audit"]
     for index, level in enumerate(selectable, start=1):
         default_marker = " (default)" if index == 1 else ""
-        print(f"  {index}. {level['key']} - {level['description']}{default_marker}")
+        print(f"  {index}. {level['key']} - {level['description']} | {level['side_effects']}{default_marker}")
     print("Press Enter for minimal report-only audit.")
     while True:
         choice = input("Audit level: ").strip()
@@ -97,6 +105,25 @@ def resolve_audit_mode(requested_mode: str | None) -> str:
     if sys.stdin.isatty() and sys.stdout.isatty():
         return prompt_for_audit_mode()
     return "audit"
+
+
+def mode_side_effect_text(mode: str, setup_manifest: dict) -> tuple[str, str]:
+    created = len(setup_manifest.get("created", []))
+    modified = len(setup_manifest.get("modified", []))
+    if mode == "audit":
+        return (
+            "report-only audit artifacts",
+            "no (report-only audit; target source files were not mutated)",
+        )
+    if mode == "symphony-live-handoff":
+        return (
+            "approval-gated handoff text in the report directory only",
+            "no (this mode does not write target source files)",
+        )
+    return (
+        "explicit bounded harness setup artifacts with rollback manifest",
+        f"bounded setup mode ({created} created, {modified} modified; no live install/config commands)",
+    )
 
 
 
@@ -198,6 +225,18 @@ def main() -> None:
     print(f"Skill update status: {out / 'update-status.json'}")
     print(f"Web verification queue: {out / 'web-verification-queue.json'}")
     print(f"AGENTS priority: {out / 'agents-priority.md'}")
+    side_effects, mutation = mode_side_effect_text(mode, setup_manifest)
+    print(f"Mode side effects: {side_effects}")
+    print(f"Target source mutation: {mutation}")
+    rec_count = len(upgrade_recommendations.get("recommendations", []) or [])
+    suppression_count = len(upgrade_recommendations.get("suppressions", []) or [])
+    queue = upgrade_recommendations.get("web_verification_queue", {}) or {}
+    print(
+        "Tool recommendations: "
+        f"{rec_count} approval-gated actionable, {suppression_count} suppressed by native coverage; "
+        f"web_verified={queue.get('web_verified', False)}; no install/config commands executed."
+    )
+    print("Approval state: low-risk audit fixes are auto-approved for follow-up; medium/high-risk and tool install/config actions require explicit approval.")
     if mode != "audit":
         print(f"Setup rollback manifest: {out / 'setup-rollback-manifest.json'}")
         print(f"Setup created: {len(setup_manifest.get('created', []))}")

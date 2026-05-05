@@ -232,6 +232,18 @@ def script_names(manifests: List[Dict[str, Any]], keywords: List[str]) -> List[s
     return sorted(found)
 
 
+def entropy_cleanup_recommendation() -> Dict[str, str]:
+    return {
+        "risk": "low",
+        "priority": "p1",
+        "title": "Plan actionable entropy cleanup",
+        "detail": (
+            "Use inventory markers.actionable_affected_files and actionable_examples to group active docs/code hotspots, "
+            "then rename stale labels, archive intentional examples, or file bounded cleanup tasks before deleting/restructuring anything."
+        ),
+    }
+
+
 def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
     dims: List[Dict[str, Any]] = []
     manifests = inv.get("manifests", [])
@@ -571,23 +583,42 @@ def score_inventory(inv: Dict[str, Any]) -> Dict[str, Any]:
 
     # 14 Entropy/scaffolding
     evidence, gaps, recs = [], [], []
-    counts = markers.get("counts", {})
-    affected_files = markers.get("affected_files", [])
-    total_markers = len(affected_files) if affected_files else (sum(int(v) for v in counts.values()) if counts else 0)
+    counts = markers.get("actionable_counts") or markers.get("counts", {})
+    affected_files = markers.get("actionable_affected_files") or markers.get("affected_files", [])
+    excluded_files = markers.get("excluded_affected_files", [])
+    raw_files = markers.get("raw_affected_files") or affected_files
+    actionable_hits = sum(int(v) for v in counts.values()) if counts else 0
+    excluded_hits = sum(int(v) for v in (markers.get("excluded_counts") or {}).values())
+    raw_hits = sum(int(v) for v in (markers.get("raw_counts") or counts).values()) if (markers.get("raw_counts") or counts) else 0
+    total_markers = len(affected_files) if affected_files else actionable_hits
     s = 8
     if total_markers == 0:
-        s = add(s, 1, evidence, "No scaffold/legacy marker hits detected.")
+        s = add(s, 1, evidence, "No actionable scaffold/legacy marker files detected.")
+        if excluded_files:
+            evidence.append(
+                f"Raw marker signal exists only in excluded/generated surfaces: {len(excluded_files)} excluded file(s), {excluded_hits} hit(s)."
+            )
     elif total_markers < 50:
-        evidence.append(f"Detected scaffold/legacy marker hits across {total_markers} files.")
+        evidence.append(f"Detected actionable scaffold/legacy marker signal across {total_markers} file(s) ({actionable_hits} hit(s)).")
+        if excluded_files:
+            evidence.append(f"Excluded/generated marker signal: {len(excluded_files)} file(s), {excluded_hits} hit(s).")
         s -= 1
     elif total_markers < 250:
-        evidence.append(f"Detected scaffold/legacy marker hits across {total_markers} files.")
-        gaps.append("Moderate scaffold/legacy marker entropy detected.")
+        evidence.append(f"Detected actionable scaffold/legacy marker signal across {total_markers} file(s) ({actionable_hits} hit(s)).")
+        if excluded_files:
+            evidence.append(f"Excluded/generated marker signal: {len(excluded_files)} file(s), {excluded_hits} hit(s).")
+        gaps.append("Moderate actionable scaffold/legacy marker entropy detected.")
+        recs.append(entropy_cleanup_recommendation())
         s -= 3
     else:
-        evidence.append(f"Detected scaffold/legacy marker hits across {total_markers} files.")
-        gaps.append("High scaffold/legacy marker entropy detected.")
+        evidence.append(f"Detected actionable scaffold/legacy marker signal across {total_markers} file(s) ({actionable_hits} hit(s)).")
+        if excluded_files:
+            evidence.append(f"Excluded/generated marker signal: {len(excluded_files)} file(s), {excluded_hits} hit(s).")
+        gaps.append("High actionable scaffold/legacy marker entropy detected.")
+        recs.append(entropy_cleanup_recommendation())
         s -= 5
+    if raw_hits and raw_hits != actionable_hits:
+        evidence.append(f"Raw marker signal before denoising: {len(raw_files)} file(s), {raw_hits} hit(s).")
     if docs.get("generated_policy_docs"):
         s = add(s, 1, evidence, "Generated artifact lifecycle guidance detected.")
     else:

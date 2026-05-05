@@ -56,7 +56,20 @@ When run from an interactive terminal without `--mode`, the script prompts for a
 
 Non-interactive runs default to `minimal`/`audit`. Use `--mode minimal` or `--mode audit` to skip the prompt explicitly.
 
+Mode boundaries:
+
+| Mode | What happens | What does not happen |
+| --- | --- | --- |
+| `audit` / `minimal` | Writes reports, scorecard, next-step artifacts, and inert prompts. | No target source mutation. |
+| `safe-setup` | Writes missing low-risk harness docs/templates with rollback manifest. | No `.codex/agents`, no deletes, no CI/config/hooks/security mutation. |
+| `force-ideal-harness` | Replaces or consolidates generated low-risk harness docs/templates when provenance allows. | No deletes, no CI/config/hooks/security mutation. |
+| `symphony-repo-local` | Writes repo-local Symphony contracts/templates and inert handoff text. | No live daemon/tool install/config mutation. |
+| `symphony-live-handoff` | Writes approval-gated live setup handoff text under the report directory. | No target source mutation and no live install/config mutation. |
+| `full-orchestration` | Writes lane-pack contracts and `.codex/agents/harness-*.toml` custom-agent definitions. | Never runs agents and never executes live install/config commands. |
+
 The upgrade recommendation layer is report-only. It requests follow-up web verification, keeps local-script `web_verified` status false, requires human approval for every install/config action, and never mutates source or configuration.
+
+The main artifacts include “What happened / What did not happen / What needs approval” plus `next-step.json` fields for `mode_summary`, `approval_state`, `tool_recommendation_state`, and `current_step_explanation`. `tool-upgrade-ralplan` is visible as an optional approval-gated branch, but it is not the default and is not auto-approved.
 
 Recommended flow:
 

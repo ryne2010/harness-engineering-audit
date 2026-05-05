@@ -76,9 +76,11 @@ prompts/ralph.md
 prompts/symphony-adoption.md
 ```
 
-The scripts do **not** change source files, docs, config, hooks, MCP, skills, or CI. They only write generated reports.
+Default `audit`/`minimal` runs do **not** change source files, docs, config, hooks, MCP, skills, or CI. They only write generated reports. Explicit setup modes below may write bounded low-risk harness artifacts with provenance markers and a rollback manifest.
 
 Upgrade recommendations are report-only by default: `recommend_tools=true`, web verification is requested but not claimed by local Python scripts, human approval is required, and install/config mutation is disabled.
+
+`report.md`, `next-step.md`, `omx-handoff.md`, and `next-step.json` surface the run state directly: what happened, what did not happen, what needs approval, current mode side effects, and the approval-gated tool recommendation branch.
 
 ## Modes
 
@@ -101,6 +103,17 @@ python3 "$AUDIT_SCRIPT" . --mode symphony-repo-local
 python3 "$AUDIT_SCRIPT" . --mode symphony-live-handoff
 python3 "$AUDIT_SCRIPT" . --mode full-orchestration
 ```
+
+Mode side-effect summary:
+
+| Mode | Target source mutation | Runs agents or installs tools? |
+| --- | --- | --- |
+| `audit` / `minimal` | No; reports only. | No. |
+| `safe-setup` | Missing low-risk docs/templates only; no `.codex/agents`. | No. |
+| `force-ideal-harness` | Bounded low-risk docs/template consolidation; no deletes or CI/config/hooks/security changes. | No. |
+| `symphony-repo-local` | Repo-local Symphony docs/contracts and inert handoff text. | No live install/config mutation. |
+| `symphony-live-handoff` | No target source mutation; report-directory handoff text only. | No. |
+| `full-orchestration` | Lane-pack contracts and `.codex/agents/harness-*.toml`. | Never runs agents or live commands. |
 
 `safe-setup` creates docs-only lane packs under `docs/harness/**` and never creates `.codex/agents`. Stack-detected lanes include activation confidence and recommendation policy fields so weak layout signals can remain advisory instead of inflating missing-lane work. `full-orchestration` is explicit opt-in for project custom-agent TOML and stronger orchestration contracts; it still does not spawn agents or execute live commands. `--force` remains only the output-directory overwrite flag; it is not the force-ideal-harness mode.
 

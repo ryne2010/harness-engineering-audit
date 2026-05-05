@@ -62,11 +62,18 @@ def read_template_file(template_filename: str) -> str:
     return (TEMPLATE_DIR / template_filename).read_text(encoding="utf-8")
 
 
+def provenance_comment(template_filename: str, mode: str) -> str:
+    text = f"{PROVENANCE} | Mode: {mode} | Source template: {template_filename}"
+    if template_filename.endswith(".toml"):
+        return f"# {text}"
+    return f"<!-- {text} -->"
+
+
 def rendered_template(template_id: str, mode: str) -> str:
     filename, _ = TARGETS[template_id]
     body = read_template_file(filename).strip()
     return (
-        f"<!-- {PROVENANCE} | Mode: {mode} | Source template: {filename} -->\n"
+        f"{provenance_comment(filename, mode)}\n"
         f"{body}\n"
     )
 
@@ -74,7 +81,7 @@ def rendered_template(template_id: str, mode: str) -> str:
 def rendered_template_file(template_filename: str, mode: str) -> str:
     body = read_template_file(template_filename).strip()
     return (
-        f"<!-- {PROVENANCE} | Mode: {mode} | Source template: {template_filename} -->\n"
+        f"{provenance_comment(template_filename, mode)}\n"
         f"{body}\n"
     )
 
@@ -127,7 +134,7 @@ def write_lane_pack_targets(repo: Path, mode: str, manifest: Dict[str, Any], lan
 def handoff_text(template_filename: str, mode: str) -> str:
     body = (TEMPLATE_DIR / template_filename).read_text(encoding="utf-8").strip()
     return (
-        f"<!-- {PROVENANCE} | Mode: {mode} | Source template: {template_filename} -->\n"
+        f"{provenance_comment(template_filename, mode)}\n"
         f"{body}\n"
     )
 

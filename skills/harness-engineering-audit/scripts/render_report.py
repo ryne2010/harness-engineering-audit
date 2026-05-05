@@ -19,6 +19,45 @@ STAGE_LABELS = {
     "ralplan": "Plan auto-approved fixes",
 }
 
+MODE_SUMMARIES = {
+    "audit": {
+        "label": "Audit / minimal",
+        "target_source_mutation": False,
+        "setup_artifacts": "reports only",
+        "description": "Report-only inventory, scoring, recommendations, and handoff artifacts.",
+    },
+    "safe-setup": {
+        "label": "Safe setup",
+        "target_source_mutation": True,
+        "setup_artifacts": "missing low-risk docs/templates only; no .codex/agents",
+        "description": "Explicit mode for missing low-risk harness docs/templates with rollback manifest.",
+    },
+    "force-ideal-harness": {
+        "label": "Force ideal harness",
+        "target_source_mutation": True,
+        "setup_artifacts": "stronger low-risk docs/template consolidation; no deletes or CI/config/hooks/security changes",
+        "description": "Explicit stronger low-risk consolidation with rollback manifest.",
+    },
+    "symphony-repo-local": {
+        "label": "Symphony repo-local",
+        "target_source_mutation": True,
+        "setup_artifacts": "repo-local Symphony contracts/templates plus inert handoff text",
+        "description": "Explicit repo-local Symphony contract setup; no live install/config mutation.",
+    },
+    "symphony-live-handoff": {
+        "label": "Symphony live handoff",
+        "target_source_mutation": False,
+        "setup_artifacts": "approval-gated handoff text in the report directory only",
+        "description": "Explicit live-setup planning handoff; no install/config mutation.",
+    },
+    "full-orchestration": {
+        "label": "Full orchestration",
+        "target_source_mutation": True,
+        "setup_artifacts": "lane-pack contracts and project custom-agent TOML; never runs agents",
+        "description": "Explicit custom-agent/lane-pack setup with rollback manifest.",
+    },
+}
+
 
 def default_report_dir_for_inventory(inventory: Dict[str, Any]) -> Path:
     repo_root = Path(str(inventory.get("repo_root") or ".")).resolve()
@@ -368,10 +407,95 @@ def default_stage_for(inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> s
     return next_step_decision_for(inventory, scorecard)["default_stage"]
 
 
-def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> Dict[str, Any]:
+def mode_summary_for(mode: str) -> Dict[str, Any]:
+    summary = dict(MODE_SUMMARIES.get(mode, MODE_SUMMARIES["audit"]))
+    summary["mode"] = mode
+    summary["report_only"] = mode == "audit"
+    summary["runs_agents"] = False
+    summary["install_config_mutation"] = False
+    summary["requires_explicit_selection"] = mode != "audit"
+    return summary
+
+
+def tool_recommendation_state_for(upgrade_recommendations: Dict[str, Any] | None) -> Dict[str, Any]:
+    upgrade_recommendations = upgrade_recommendations or default_upgrade_recommendations()
+    policy = upgrade_recommendations.get("policy", {}) or {}
+    queue = upgrade_recommendations.get("web_verification_queue", {}) or {}
+    recs = upgrade_recommendations.get("recommendations", []) or []
+    suppressions = upgrade_recommendations.get("suppressions", []) or []
+    return {
+        "stage": "tool-upgrade-ralplan",
+        "label": "Plan approval-gated tool upgrades",
+        "recommended_default": False,
+        "actionable_recommendations": len(recs),
+        "suppressed_by_native_coverage": len(suppressions),
+        "web_verification_requested": bool(policy.get("web_requested", True)),
+        "web_verified": bool(queue.get("web_verified", False)),
+        "approval_gate": policy.get("approval_gate", "required"),
+        "approval_required": policy.get("approval_gate", "required") == "required" or bool(recs),
+        "install_config_mutation": bool(policy.get("install_config_mutation", False)),
+        "verification_mode": queue.get("verification_mode", "static-catalog"),
+    }
+
+
+def approval_state_for(scorecard: Dict[str, Any], tool_state: Dict[str, Any]) -> Dict[str, Any]:
+    summary = recommendation_summary_for(scorecard)
+    return {
+        "low_risk_auto_approved": int(summary.get("auto_approved", 0) or 0),
+        "review_required_findings": int(summary.get("review_required", 0) or 0),
+        "explicit_approval_required_findings": int(summary.get("explicit_approval_required", 0) or 0),
+        "medium_risk_findings": int(summary.get("medium_risk", 0) or 0),
+        "high_risk_findings": int(summary.get("high_risk", 0) or 0),
+        "tool_upgrades_approval_required": bool(tool_state.get("approval_required", True)),
+        "tool_upgrades_default": bool(tool_state.get("recommended_default", False)),
+        "policy": "Low-risk audit recommendations are auto-approved for follow-up planning/execution; medium/high-risk findings and tool install/config actions require explicit approval.",
+    }
+
+
+def mode_approval_markdown(paths: Dict[str, str], scorecard: Dict[str, Any], upgrade_recommendations: Dict[str, Any] | None, mode: str) -> str:
+    mode_state = mode_summary_for(mode)
+    tool_state = tool_recommendation_state_for(upgrade_recommendations)
+    approval_state = approval_state_for(scorecard, tool_state)
+    mutation_line = "No target source files were mutated." if not mode_state["target_source_mutation"] else f"Target source mutation is possible only within this explicit mode's bounded setup scope: {mode_state['setup_artifacts']}."
+    return f"""## Mode, Side Effects, and Approval State
+
+### What happened
+
+- Mode selected: `{mode}` ({mode_state['label']}).
+- The audit wrote report artifacts under `{paths['report_dir']}`.
+- Default next-step selection is derived from normalized audit findings, not from optional tool-upgrade or full-orchestration branches.
+- Tool recommendations were summarized as inert planning inputs: {tool_state['actionable_recommendations']} actionable, {tool_state['suppressed_by_native_coverage']} suppressed by native Codex/OMX coverage.
+
+### What did not happen
+
+- {mutation_line}
+- No agents were spawned or run by the audit.
+- No install/config commands were executed.
+- Local Python scripts did not claim live web verification (`web_verified: {tool_state['web_verified']}`).
+- `full-orchestration` and `tool-upgrade-ralplan` remain visible options, but neither is the default unless explicitly selected later.
+
+### What needs approval
+
+- Low-risk findings auto-approved for follow-up: {approval_state['low_risk_auto_approved']}.
+- Review-required findings: {approval_state['review_required_findings']}; explicit-approval findings: {approval_state['explicit_approval_required_findings']}.
+- Tool upgrades require human approval and source verification before any install/config command: `{tool_state['approval_gate']}`.
+- Optional setup modes require explicit mode selection and remain bounded by their side-effect contract.
+"""
+
+
+def render_next_step_json(
+    paths: Dict[str, str],
+    inventory: Dict[str, Any],
+    scorecard: Dict[str, Any],
+    upgrade_recommendations: Dict[str, Any] | None = None,
+    mode: str = "audit",
+) -> Dict[str, Any]:
     decision = next_step_decision_for(inventory, scorecard)
     default_stage = decision["default_stage"]
     repo_root = paths["repo_root"]
+    tool_state = tool_recommendation_state_for(upgrade_recommendations)
+    mode_state = mode_summary_for(mode)
+    approval_state = approval_state_for(scorecard, tool_state)
     stages = [
         {
             "stage": "safe-setup",
@@ -443,6 +567,8 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
             "prompt_file": paths["tool_upgrade_prompt"],
             "command": prompt_command("$ralplan", paths["tool_upgrade_prompt"]),
             "recommended": False,
+            "approval_required": True,
+            "default_branch": False,
             "description": "Use after reviewing stack/tool recommendations; verifies official sources and plans only the human-approved tooling slice.",
         },
         {
@@ -481,15 +607,27 @@ def render_next_step_json(paths: Dict[str, str], inventory: Dict[str, Any], scor
         "repo_root": repo_root,
         "agents_priority": paths["agents_priority"],
         "omx_handoff": paths["omx_handoff"],
+        "mode_summary": mode_state,
+        "mode_safety": mode_state,
+        "approval_state": approval_state,
+        "tool_recommendation_state": tool_state,
+        "current_step_explanation": "Audit artifacts are ready. Select the default next stage for planning/setup, or use the visible optional branches only after explicit approval.",
         "decision": decision,
         "stages": stages,
     }
 
 
-def render_next_step_markdown(paths: Dict[str, str], inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> str:
-    next_step = render_next_step_json(paths, inventory, scorecard)
+def render_next_step_markdown(
+    paths: Dict[str, str],
+    inventory: Dict[str, Any],
+    scorecard: Dict[str, Any],
+    upgrade_recommendations: Dict[str, Any] | None = None,
+    mode: str = "audit",
+) -> str:
+    next_step = render_next_step_json(paths, inventory, scorecard, upgrade_recommendations, mode=mode)
     decision = next_step["decision"]
     default_label = default_stage_entry(next_step).get("label", "Plan auto-approved fixes")
+    tool_state = next_step["tool_recommendation_state"]
     lines = [
         "# Harness Engineering Audit: Next Step",
         "",
@@ -498,6 +636,17 @@ def render_next_step_markdown(paths: Dict[str, str], inventory: Dict[str, Any], 
         f"Reason: {decision['reason']}",
         "",
         "Low-risk findings are auto-approved for the follow-up execution pass. AGENTS.md improvements are P0 and should be planned/executed first. Medium/high-risk findings still require explicit approval.",
+        "",
+        mode_approval_markdown(paths, scorecard, upgrade_recommendations, mode).rstrip(),
+        "",
+        "## Optional approval-gated tool branch",
+        "",
+        f"- Actionable tool recommendations: {tool_state['actionable_recommendations']}",
+        f"- Suppressed by native Codex/OMX coverage: {tool_state['suppressed_by_native_coverage']}",
+        f"- Web verified by local script: `{tool_state['web_verified']}`",
+        f"- Install/config mutation by audit: `{tool_state['install_config_mutation']}`",
+        f"- Planning prompt: `{paths['tool_upgrade_prompt']}`",
+        "- This branch is visible for planning but is **not** the default and is **not** auto-approved.",
         "",
         "In an interactive OMX session, the skill should present this as a selection so you do not need to copy or retype long prompts.",
         "",
@@ -525,7 +674,14 @@ def render_next_step_markdown(paths: Dict[str, str], inventory: Dict[str, Any], 
     return "\n".join(lines).rstrip() + "\n"
 
 
-def write_next_step_artifacts(paths: Dict[str, str], out_dir: Path, inventory: Dict[str, Any], scorecard: Dict[str, Any]) -> None:
+def write_next_step_artifacts(
+    paths: Dict[str, str],
+    out_dir: Path,
+    inventory: Dict[str, Any],
+    scorecard: Dict[str, Any],
+    upgrade_recommendations: Dict[str, Any] | None = None,
+    mode: str = "audit",
+) -> None:
     prompts_dir = out_dir / PROMPT_DIR
     prompts_dir.mkdir(parents=True, exist_ok=True)
     for stage, filename in [
@@ -537,9 +693,16 @@ def write_next_step_artifacts(paths: Dict[str, str], out_dir: Path, inventory: D
         ("tool-upgrade-ralplan", "tool-upgrade-ralplan.md"),
     ]:
         (prompts_dir / filename).write_text(render_stage_prompt(stage, paths), encoding="utf-8")
-    (out_dir / "next-step.md").write_text(render_next_step_markdown(paths, inventory, scorecard), encoding="utf-8")
+    (out_dir / "next-step.md").write_text(
+        render_next_step_markdown(paths, inventory, scorecard, upgrade_recommendations, mode=mode),
+        encoding="utf-8",
+    )
     (out_dir / NEXT_STEP_FILE).write_text(
-        json.dumps(render_next_step_json(paths, inventory, scorecard), indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            render_next_step_json(paths, inventory, scorecard, upgrade_recommendations, mode=mode),
+            indent=2,
+            sort_keys=True,
+        ) + "\n",
         encoding="utf-8",
     )
 
@@ -898,15 +1061,16 @@ def render_main_report(
     vocabulary = inventory.get("vocabulary_readiness", {})
     doc_gardening = inventory.get("doc_gardening_readiness", {})
     markers = inventory.get("markers", {})
-    marker_counts = markers.get("counts", {})
-    marker_affected_files = markers.get("affected_files", [])
-    if "affected_files" in markers:
-        marker_metric_label = "affected files"
-        total_markers = len(marker_affected_files)
-    else:
-        marker_metric_label = "raw hits"
-        total_markers = sum(int(v) for v in marker_counts.values()) if marker_counts else 0
-    next_step = render_next_step_json(paths, inventory, scorecard)
+    marker_counts = markers.get("actionable_counts") or markers.get("counts", {})
+    marker_affected_files = markers.get("actionable_affected_files") or markers.get("affected_files", [])
+    marker_raw_counts = markers.get("raw_counts") or marker_counts
+    marker_raw_files = markers.get("raw_affected_files") or marker_affected_files
+    marker_excluded_counts = markers.get("excluded_counts") or {}
+    marker_excluded_files = markers.get("excluded_affected_files") or []
+    actionable_marker_hits = sum(int(v) for v in marker_counts.values()) if marker_counts else 0
+    raw_marker_hits = sum(int(v) for v in marker_raw_counts.values()) if marker_raw_counts else 0
+    excluded_marker_hits = sum(int(v) for v in marker_excluded_counts.values()) if marker_excluded_counts else 0
+    next_step = render_next_step_json(paths, inventory, scorecard, upgrade_recommendations, mode=mode)
     next_decision = next_step["decision"]
     next_stage = default_stage_entry(next_step)
     next_stage_label = next_stage.get("label", stage_label(next_decision["default_stage"]))
@@ -927,6 +1091,8 @@ Mode: `{mode}`.
 
 - Lifecycle classification: `{scorecard.get('lifecycle', {}).get('classification', inventory.get('lifecycle', {}).get('classification', 'unknown'))}`
 - Score schema version: `{scorecard.get('score_schema_version', '1')}`
+
+{mode_approval_markdown(paths, scorecard, upgrade_recommendations, mode)}
 
 ## Score Summary
 
@@ -956,7 +1122,9 @@ Mode: `{mode}`.
 - OMX contexts: {len(omx.get('contexts', []))}
 - OMX plans: {len(omx.get('plans', []))}
 - Generated/report artifact candidate dirs: {len(inventory.get('generated_artifacts', {}).get('candidate_dirs', []))}
-- Scaffold/legacy marker {marker_metric_label}: {total_markers}
+- Scaffold/legacy marker affected files: {len(marker_affected_files)} actionable active-repo file(s) ({actionable_marker_hits} hit(s))
+- Raw scaffold/legacy marker affected files: {len(marker_raw_files)} file(s) ({raw_marker_hits} hit(s))
+- Excluded/generated scaffold marker affected files: {len(marker_excluded_files)} file(s) ({excluded_marker_hits} hit(s))
 
 {render_readiness_registry_summary(scorecard)}
 
@@ -1078,8 +1246,14 @@ AGENTS.md remediation is the first auto-approved harness-engineering lane.
 """
 
 
-def render_omx_handoff(inventory: Dict[str, Any], scorecard: Dict[str, Any], paths: Dict[str, str]) -> str:
-    next_step = render_next_step_json(paths, inventory, scorecard)
+def render_omx_handoff(
+    inventory: Dict[str, Any],
+    scorecard: Dict[str, Any],
+    paths: Dict[str, str],
+    upgrade_recommendations: Dict[str, Any] | None = None,
+    mode: str = "audit",
+) -> str:
+    next_step = render_next_step_json(paths, inventory, scorecard, upgrade_recommendations, mode=mode)
     next_decision = next_step["decision"]
     next_stage = default_stage_entry(next_step)
     next_stage_label = next_stage.get("label", stage_label(next_decision["default_stage"]))
@@ -1107,6 +1281,8 @@ Scorecard path:
 ## Current verdict
 
 Overall score: **{scorecard.get('overall_score')}/10** ({scorecard.get('overall_status')})
+
+{mode_approval_markdown(paths, scorecard, upgrade_recommendations, mode)}
 
 ## Low-typing next step
 
@@ -1219,8 +1395,11 @@ def write_reports(
     (out_dir / "findings.md").write_text(render_findings(scorecard), encoding="utf-8")
     (out_dir / "recommended-fixes.md").write_text(render_recommended_fixes(scorecard), encoding="utf-8")
     (out_dir / "agents-priority.md").write_text(render_agents_priority(inventory, scorecard), encoding="utf-8")
-    (out_dir / "omx-handoff.md").write_text(render_omx_handoff(inventory, scorecard, paths), encoding="utf-8")
-    write_next_step_artifacts(paths, out_dir, inventory, scorecard)
+    (out_dir / "omx-handoff.md").write_text(
+        render_omx_handoff(inventory, scorecard, paths, upgrade_recommendations, mode=mode),
+        encoding="utf-8",
+    )
+    write_next_step_artifacts(paths, out_dir, inventory, scorecard, upgrade_recommendations, mode=mode)
 
 
 def main() -> None:

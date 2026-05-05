@@ -20,6 +20,7 @@ IGNORE_DIRS = {
 }
 
 AUDIT_SIGNAL_EXCLUDED_PREFIXES = {
+    (".tmp",),
     (".codex", "reports"),
     (".omx", "cache"),
     (".omx", "context"),
@@ -44,6 +45,40 @@ SCAFFOLD_MARKERS = [
     "demo", "stage", "milestone", "bootstrap", "fallback", "spike", "generated-only",
     "host wrapper", "todo", "fixme", "hack", "for now"
 ]
+
+MARKER_PATTERNS = {
+    marker: re.compile(rf"(?<![a-z0-9_]){re.escape(marker)}(?![a-z0-9_])", re.IGNORECASE)
+    for marker in SCAFFOLD_MARKERS
+}
+
+ENTROPY_SCAN_IGNORED_PREFIXES = {
+    (".agents", "skills", "harness-engineering-audit"),
+    (".codex", "skills", "harness-engineering-audit"),
+    ("plugins", "harness-engineering-audit", "skills", "harness-engineering-audit"),
+    ("skills", "harness-engineering-audit", "assets"),
+}
+
+ENTROPY_EXCLUDED_PREFIXES = {
+    (".tmp",),
+    (".codex", "agents"),
+    (".codex", "reports"),
+    (".omx", "archive"),
+    (".omx", "cache"),
+    (".omx", "context"),
+    (".omx", "interviews"),
+    (".omx", "logs"),
+    (".omx", "plans"),
+    (".omx", "state"),
+}
+
+ENTROPY_EXCLUDED_PARTS = {
+    "__generated__",
+    "__snapshots__",
+    "generated",
+    "generated-client",
+    "generated-clients",
+    "snapshots",
+}
 
 CROSS_AGENT_PATTERNS = [
     "CLAUDE.md", ".claude", ".cursor", ".windsurf", ".cline", ".gemini",
@@ -511,25 +546,116 @@ def find_cross_agent(root: Path) -> Dict[str, Any]:
     return {"surfaces": found}
 
 
+def is_entropy_scan_ignored(path: Path) -> bool:
+    """Skip heavyweight or audit-owned source surfaces for marker accounting."""
+
+    parts = path.parts
+    if any(part in IGNORE_DIRS for part in parts):
+        return True
+    return any(parts[:len(prefix)] == prefix for prefix in ENTROPY_SCAN_IGNORED_PREFIXES)
+
+
+def is_entropy_excluded(path: Path) -> bool:
+    """Return true when marker hits are traceable but should not affect score."""
+
+    parts = path.parts
+    if any(parts[:len(prefix)] == prefix for prefix in ENTROPY_EXCLUDED_PREFIXES):
+        return True
+    return any(part.lower() in ENTROPY_EXCLUDED_PARTS for part in parts)
+
+
+def iter_entropy_files(root: Path) -> Iterable[Path]:
+    for dirpath, dirnames, filenames in os.walk(root):
+        current = Path(dirpath)
+        rel_current = current.relative_to(root) if current != root else Path("")
+        if is_entropy_scan_ignored(rel_current):
+            dirnames[:] = []
+            continue
+        dirnames[:] = [d for d in dirnames if not is_entropy_scan_ignored((current / d).relative_to(root))]
+        for filename in filenames:
+            path = current / filename
+            if not is_entropy_scan_ignored(path.relative_to(root)):
+                yield path
+
+
+def empty_marker_examples() -> Dict[str, List[str]]:
+    return {m: [] for m in SCAFFOLD_MARKERS}
+
+
+def add_marker_example(examples: Dict[str, List[str]], marker: str, path: str) -> None:
+    bucket = examples.setdefault(marker, [])
+    if len(bucket) < 10 and path not in bucket:
+        bucket.append(path)
+
+
 def marker_scan(root: Path) -> Dict[str, Any]:
-    counts = {m: 0 for m in SCAFFOLD_MARKERS}
-    examples: Dict[str, List[str]] = {m: [] for m in SCAFFOLD_MARKERS}
-    affected_files: set[str] = set()
-    total_files = 0
-    for path in iter_files(root):
+    raw_counts = {m: 0 for m in SCAFFOLD_MARKERS}
+    actionable_counts = {m: 0 for m in SCAFFOLD_MARKERS}
+    excluded_counts = {m: 0 for m in SCAFFOLD_MARKERS}
+    raw_examples = empty_marker_examples()
+    actionable_examples = empty_marker_examples()
+    excluded_examples = empty_marker_examples()
+    raw_affected_files: set[str] = set()
+    actionable_affected_files: set[str] = set()
+    excluded_affected_files: set[str] = set()
+    raw_text_files_scanned = 0
+    actionable_text_files_scanned = 0
+    excluded_text_files_scanned = 0
+
+    for path in iter_entropy_files(root):
         text = read_text(path, limit=500_000)
         if not text:
             continue
-        total_files += 1
-        lower = text.lower()
-        for marker in SCAFFOLD_MARKERS:
-            c = lower.count(marker)
-            if c:
-                counts[marker] += c
-                affected_files.add(rel(path, root))
-                if len(examples[marker]) < 10:
-                    examples[marker].append(rel(path, root))
-    return {"counts": counts, "affected_files": sorted(affected_files), "examples": examples, "text_files_scanned": total_files}
+        rel_path = rel(path, root)
+        excluded = is_entropy_excluded(path.relative_to(root))
+        raw_text_files_scanned += 1
+        if excluded:
+            excluded_text_files_scanned += 1
+        else:
+            actionable_text_files_scanned += 1
+        for marker, pattern in MARKER_PATTERNS.items():
+            c = len(pattern.findall(text))
+            if not c:
+                continue
+            raw_counts[marker] += c
+            raw_affected_files.add(rel_path)
+            add_marker_example(raw_examples, marker, rel_path)
+            if excluded:
+                excluded_counts[marker] += c
+                excluded_affected_files.add(rel_path)
+                add_marker_example(excluded_examples, marker, rel_path)
+            else:
+                actionable_counts[marker] += c
+                actionable_affected_files.add(rel_path)
+                add_marker_example(actionable_examples, marker, rel_path)
+
+    return {
+        # Backward-compatible scoring/reporting keys now represent actionable signal.
+        "counts": actionable_counts,
+        "affected_files": sorted(actionable_affected_files),
+        "examples": actionable_examples,
+        "text_files_scanned": actionable_text_files_scanned,
+        # Explicit denoised shape.
+        "actionable_counts": actionable_counts,
+        "actionable_affected_files": sorted(actionable_affected_files),
+        "actionable_examples": actionable_examples,
+        "actionable_text_files_scanned": actionable_text_files_scanned,
+        "excluded_counts": excluded_counts,
+        "excluded_affected_files": sorted(excluded_affected_files),
+        "excluded_examples": excluded_examples,
+        "excluded_text_files_scanned": excluded_text_files_scanned,
+        "raw_counts": raw_counts,
+        "raw_affected_files": sorted(raw_affected_files),
+        "raw_examples": raw_examples,
+        "raw_text_files_scanned": raw_text_files_scanned,
+        "matching_policy": {
+            "schema": "harness-engineering-audit.marker-scan-policy.v1",
+            "matching": "case-insensitive phrase/word-boundary regex",
+            "actionable_scoring": "Entropy score uses actionable active-repo marker files, not raw generated/runtime noise.",
+            "excluded_prefixes": ["/".join(prefix) for prefix in sorted(ENTROPY_EXCLUDED_PREFIXES)],
+            "excluded_parts": sorted(ENTROPY_EXCLUDED_PARTS),
+        },
+    }
 
 
 def generated_artifacts(root: Path) -> Dict[str, Any]:
